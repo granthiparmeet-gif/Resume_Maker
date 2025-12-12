@@ -78,7 +78,11 @@ else:
 # PDF Generator
 # -----------------------------
 def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
-    filename = f"Parmeet_Singh_{job_role}.pdf"
+    tokens = [t for t in re.split(r"[_\s]+", job_role) if t]
+    short_role = "_".join(tokens[:4]) if tokens else "Role"
+    if len(short_role) > 40:
+        short_role = short_role[:40].rstrip("_")
+    filename = f"Parmeet_Singh_{short_role}.pdf"
     raw_lines = text.split("\n")
     lines = [ln for ln in raw_lines if ln is not None]
     total_lines = max(len(lines), 1)
@@ -108,14 +112,16 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
 
     safe_lines = [normalize_line(line) for line in lines]
 
-    # Determine body font size to fit longest line within width.
+    # Determine body font size to fit longest line within width, but keep standard size
+    # for the Experience-Focused layout so the text never shrinks.
     font_size = base_font_size
     pdf.set_font("Arial", size=font_size)
-    max_line_width = max(pdf.get_string_width(line) for line in safe_lines if line.strip()) or 0
-    if max_line_width > usable_width:
-        scale = usable_width / max_line_width
-        font_size = max(7, round(base_font_size * scale, 1))
-        pdf.set_font("Arial", size=font_size)
+    if selected_format != "Experience-Focused (No LinkedIn/Projects)":
+        max_line_width = max(pdf.get_string_width(line) for line in safe_lines if line.strip()) or 0
+        if max_line_width > usable_width:
+            scale = usable_width / max_line_width
+            font_size = max(7, round(base_font_size * scale, 1))
+            pdf.set_font("Arial", size=font_size)
 
     # Line height scaled to fill the page without overflow.
     line_height = available_height / total_lines
@@ -179,6 +185,41 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             idx += take
         return out
 
+    def wrap_text_to_width(text_line: str) -> list[str]:
+        """Wrap a paragraph so each line fits within the usable width."""
+        cleaned = text_line.strip()
+        if not cleaned:
+            return [""]
+        pdf.set_font("Arial", "", font_size)
+        words = cleaned.split()
+        lines = []
+        current_line = words[0]
+        for word in words[1:]:
+            candidate = f"{current_line} {word}"
+            if pdf.get_string_width(candidate) <= usable_width:
+                current_line = candidate
+            else:
+                lines.append(current_line)
+                current_line = word
+        lines.append(current_line)
+        return lines
+
+    def wrap_bullet_line(text_line: str) -> list[str]:
+        stripped = text_line.lstrip()
+        bullet_char = "-"
+        remainder = stripped
+        if stripped and stripped[0] in "-•*–":
+            bullet_char = stripped[0]
+            remainder = stripped[1:].lstrip()
+        segments = wrap_text_to_width(remainder)
+        if not segments:
+            return [f"{bullet_char} "]
+        lines = []
+        for idx, segment in enumerate(segments):
+            prefix = f"{bullet_char} " if idx == 0 else "  "
+            lines.append(f"{prefix}{segment}")
+        return lines
+
     def is_bullet_line(text_line: str) -> bool:
         stripped = text_line.lstrip()
         return stripped.startswith(("-", "•", "*", "–"))
@@ -186,12 +227,20 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     def render_contact_line(line_text: str):
         segments = [seg.strip() for seg in line_text.split("|") if seg.strip()]
         if selected_format == "Experience-Focused (No LinkedIn/Projects)":
-            segments = [
-                seg
-                for seg in segments
-                if "parmeetsingh.com" not in seg.lower()
-                and "linkedin" not in seg.lower()
-            ]
+            email_seg = None
+            phone_seg = None
+            for seg in segments:
+                lower = seg.lower()
+                if "@" in seg:
+                    email_seg = seg
+                elif any(ch.isdigit() for ch in seg):
+                    phone_seg = seg
+            ordered = []
+            if phone_seg:
+                ordered.append(phone_seg)
+            if email_seg:
+                ordered.append(email_seg)
+            segments = ordered
         pdf.set_font("Arial", "", font_size)
         pdf.set_text_color(0, 0, 0)
         x_start = left_margin
@@ -200,7 +249,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         links = []
         for seg in segments:
             link = None
-            seg_clean = seg
+            seg_clean = seg.rstrip(",")
             if "@" in seg:
                 link = f"mailto:{seg}"
             elif "http" in seg.lower() or "www." in seg.lower():
@@ -228,12 +277,27 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
                 pdf.cell(pdf.get_string_width(" | "), line_height, " | ", ln=0, align="C")
         pdf.ln(line_height)
 
+    def render_body_line(line_text: str):
+        # Detect a single URL-like token for hyperlinking.
+        url_match = re.search(r"(https?://\S+|www\.\S+|parmeetsingh\.com)", line_text)
+        link = None
+        if url_match:
+            url = url_match.group(1)
+            link = url if url.startswith("http") else f"https://{url}"
+        if link:
+            pdf.set_text_color(0, 0, 255)
+        else:
+            pdf.set_text_color(0, 0, 0)
+        pdf.cell(usable_width, line_height, line_text, ln=1, align="J", link=link)
+        pdf.set_text_color(0, 0, 0)
+
     # Header rendering: use first non-empty as name, second non-empty as contact.
     pdf.set_xy(left_margin, top_margin)
     heading_count = 0
     line_idx = 0
     name_line = ""
     contact_line = ""
+    current_section = None
     for ln in safe_lines:
         if ln.strip():
             name_line = ln.strip()
@@ -283,10 +347,24 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
             heading_count += 1
             expect_company_meta = False
+            current_section = stripped
             idx += 1
             continue
 
         if not stripped:
+            next_heading = ""
+            for j in range(idx + 1, len(safe_lines)):
+                candidate = safe_lines[j].strip()
+                if candidate:
+                    next_heading = candidate
+                    break
+            if (
+                selected_format == "Experience-Focused (No LinkedIn/Projects)"
+                and next_heading
+                and is_heading(next_heading)
+            ):
+                idx += 1
+                continue
             pdf.ln(line_height)
             expect_company_meta = False
             idx += 1
@@ -311,7 +389,9 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         # Render bullet lines one-per-line without reflow.
         if is_bullet_line(stripped):
             pdf.set_font("Arial", "", font_size)
-            pdf.cell(usable_width, line_height, stripped, ln=1, align="J")
+            bullet_lines = wrap_bullet_line(stripped)
+            for bullet in bullet_lines:
+                pdf.cell(usable_width, line_height, bullet, ln=1, align="J")
             expect_company_meta = False
             idx += 1
             continue
@@ -336,9 +416,15 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             idx += 1
             continue
 
-        reflowed = reflow_block(block)
+        is_summary_block = current_section and current_section.lower().strip() == "professional summary"
+        if is_summary_block:
+            paragraph = " ".join(block).strip()
+            lines_to_render = wrap_text_to_width(paragraph)
+        else:
+            lines_to_render = reflow_block(block)
+
         pdf.set_font("Arial", "", font_size)
-        for ln in reflowed:
+        for ln in lines_to_render:
             pdf.cell(usable_width, line_height, ln, ln=1, align="J")
 
     pdf.output(filename)
@@ -379,6 +465,11 @@ FORMAT_STYLES = {
             "Remove the LinkedIn link from the contact block and omit the Independent Projects section entirely. "
             "Reuse the reclaimed lines to expand company experience bullet points with richer impact and metrics. "
             "Preserve the original line count and section ordering; replace removed lines with richer experience content so formatting stays identical to the template."
+            " Make the Professional Summary a single experience-focused paragraph composed of exactly six sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
+            "Weave in language that underscores ethics, responsibility, impact, and a problem-solving mindset so the paragraph reads as someone who believes in responsible change."
+            "Ensure every experience bullet stays concise, precise, and within the page margins, leveraging strong numbers from the job description so the text never overruns the column."
+            " If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
+            " Limit the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to three bullets and the Kiran Engineering Works - AI & Software Engineer section to seven bullets so the generated resume matches the requested detail level."
         ),
     },
 }
@@ -387,6 +478,8 @@ EXPERIENCE_GUIDELINES = """
 - Every experience bullet must quantify its impact with concrete metrics (percentages, time saved, revenue lifted, downtime reduced, adoption increased, etc.). If the exact number is not stated, infer a realistic yet defensible metric from the job description and responsibilities.
 - Keep each employer aligned with its domain: the first company is a software/AI organization—highlight platform engineering, AI delivery, cloud scale, SLOs, or product impact. The second company is Kiran Engineering Works—showcase automation, embedded systems, mechanical-electrical integration, manufacturing throughput, or robotics improvements.
 - Metrics must sound credible (e.g., "reduced deployment time 35%", "improved uptime to 99.3%", "cut calibration effort by 28%", "boosted analytics adoption 2.1x"). Avoid generic statements without measurable change.
+- For the Experience-Focused layout, keep LTI - Larsen & Toubro Infotech Ltd. - Software Engineer to three precise bullets and Kiran Engineering Works - AI & Software Engineer to seven bullets so the detail remains focused.
+- For the Experience-Focused format in particular, keep every bullet short enough to stay on a single line, rewriting them to be precise, impact-first sentences so they never exceed the template’s column width.
 """.strip()
 
 SESSION_DEFAULTS = {
@@ -398,7 +491,7 @@ SESSION_DEFAULTS = {
     "updated_resume": "",
     "pdf_filename": "",
     "pdf_bytes": None,
-    "selected_format": list(FORMAT_STYLES.keys())[0],
+    "selected_format": "Experience-Focused (No LinkedIn/Projects)",
 }
 for key, value in SESSION_DEFAULTS.items():
     st.session_state.setdefault(key, value)
@@ -589,6 +682,40 @@ Return only the updated resume with EXACTLY the same number of lines as the temp
     return response.choices[0].message.content
 
 
+def enforce_projects_block(text):
+    """Ensure a canonical Independent Projects block for the LinkedIn + Projects format."""
+    canonical = [
+        "Independent Projects / Portfolio - Live at parmeetsingh.com",
+        "- Featured Projects: YouTube RAG · NetZero Advisor · Research Agent · Legal Document Analyzer",
+        "- YouTube RAG: Turns YouTube videos into a searchable knowledge base with transcript-grounded Q&A.",
+        "- NetZero Advisor: AI advisor for carbon credits and sustainability insights using retrieval and reasoning.",
+        "- Research Agent: Automates multi-source research by collecting and summarizing relevant information.",
+        "- Legal Document Analyzer: Answers questions from long legal documents using structured retrieval.",
+    ]
+
+    lines = text.split("\n")
+    start = None
+    end = None
+    for idx, ln in enumerate(lines):
+        if "independent projects" in ln.lower():
+            start = idx
+            break
+    if start is not None:
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            nxt = lines[j].strip()
+            if not nxt:
+                end = j
+                break
+            if nxt.isupper() or nxt.lower() in {"experience", "skills", "education", "core skills"}:
+                end = j
+                break
+        lines = lines[:start] + canonical + lines[end:]
+    else:
+        lines.extend([""] + canonical)
+    return "\n".join(lines)
+
+
 # --- Workflow Controls ---
 col_check, col_generate, col_reset = st.columns([3, 3, 1])
 with col_check:
@@ -663,10 +790,13 @@ with col_generate:
                             "parmeetsingh.com", ""
                         ).replace("LinkedIn", "").strip()
 
-                if "granthi.parmeet@gmail.com" in updated_resume:
-                    updated_resume = updated_resume.replace(
-                        "granthi.parmeet@gmail.com", PRIMARY_EMAIL
-                    )
+                    if st.session_state.get("selected_format") == "LinkedIn + Projects":
+                        updated_resume = enforce_projects_block(updated_resume)
+
+                    if "granthi.parmeet@gmail.com" in updated_resume:
+                        updated_resume = updated_resume.replace(
+                            "granthi.parmeet@gmail.com", PRIMARY_EMAIL
+                        )
 
                 first_line = job_desc_for_generation.split("\n")[0].strip()
                 job_role = re.sub(r"[^A-Za-z0-9]+", "_", first_line) or "Role"
