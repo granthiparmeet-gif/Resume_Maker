@@ -2,6 +2,7 @@ import json
 import os
 import re
 import textwrap
+import math
 
 import openai
 import streamlit as st
@@ -23,6 +24,7 @@ PREFERRED_TEMPLATE_NAMES = [
     "Resume_Parmeet_Singh.pdf",
     "parmeet_singh_resume.pdf",
 ]
+PRIMARY_EMAIL = "parmeet.singh@parmeetsingh.com"
 TEMPLATE_PATH = next(
     (path for path in PREFERRED_TEMPLATE_NAMES if os.path.exists(path)),
     PREFERRED_TEMPLATE_NAMES[0],
@@ -75,9 +77,10 @@ else:
 # -----------------------------
 # PDF Generator
 # -----------------------------
-def generate_pdf(text, job_role):
+def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     filename = f"Parmeet_Singh_{job_role}.pdf"
-    lines = text.split("\n")
+    raw_lines = text.split("\n")
+    lines = [ln for ln in raw_lines if ln is not None]
     total_lines = max(len(lines), 1)
 
     pdf = FPDF()
@@ -95,9 +98,12 @@ def generate_pdf(text, job_role):
 
     base_font_size = 11
     def normalize_line(text_line: str) -> str:
-        cleaned = re.sub(r"\s\?\s", " - ", text_line)
+        # Normalize dashes and bullets so they survive Latin-1 encoding.
+        cleaned = text_line.replace("–", "-").replace("—", "-").replace("‑", "-").replace("•", "-")
+        cleaned = re.sub(r"\s\?\s", " - ", cleaned)
         cleaned = re.sub(r"\s\?(\W|$)", r" -\1", cleaned)
         cleaned = re.sub(r"(\W|^)\?\s", r"\1- ", cleaned)
+        cleaned = cleaned.replace("?", "-")
         return (cleaned.encode("latin-1", "replace").decode("latin-1")) or " "
 
     safe_lines = [normalize_line(line) for line in lines]
@@ -145,42 +151,195 @@ def generate_pdf(text, job_role):
             return True
         return False
 
+    def is_company_role(text_line: str) -> bool:
+        stripped = text_line.strip()
+        if not stripped:
+            return False
+        # Heuristic: contains a dash or bullet separating company and role, but not a section heading.
+        if " - " in stripped or " — " in stripped or " – " in stripped:
+            return True
+        return False
+
+    def reflow_block(lines_block):
+        """Reflow a block of body lines to the same count, distributing words evenly."""
+        if not lines_block:
+            return []
+        words = []
+        for ln in lines_block:
+            words.extend(ln.split())
+        target = len(lines_block)
+        out = []
+        idx = 0
+        for i in range(target):
+            remaining_lines = target - i
+            remaining_words = len(words) - idx
+            take = max(1, math.ceil(remaining_words / remaining_lines))
+            segment = " ".join(words[idx : idx + take])
+            out.append(segment)
+            idx += take
+        return out
+
+    def is_bullet_line(text_line: str) -> bool:
+        stripped = text_line.lstrip()
+        return stripped.startswith(("-", "•", "*", "–"))
+
+    def render_contact_line(line_text: str):
+        segments = [seg.strip() for seg in line_text.split("|") if seg.strip()]
+        if selected_format == "Experience-Focused (No LinkedIn/Projects)":
+            segments = [
+                seg
+                for seg in segments
+                if "parmeetsingh.com" not in seg.lower()
+                and "linkedin" not in seg.lower()
+            ]
+        pdf.set_font("Arial", "", font_size)
+        pdf.set_text_color(0, 0, 0)
+        x_start = left_margin
+        y_start = pdf.get_y()
+        text_widths = []
+        links = []
+        for seg in segments:
+            link = None
+            seg_clean = seg
+            if "@" in seg:
+                link = f"mailto:{seg}"
+            elif "http" in seg.lower() or "www." in seg.lower():
+                url = seg if seg.lower().startswith("http") else f"https://{seg}"
+                link = url
+            elif "parmeetsingh.com" in seg.lower():
+                link = "https://parmeetsingh.com"
+            elif "linkedin" in seg.lower():
+                link = "https://linkedin.com"
+            links.append(link)
+            text_widths.append(pdf.get_string_width(seg_clean))
+
+        total_text_width = sum(text_widths) + max(len(segments) - 1, 0) * pdf.get_string_width(" | ")
+        x_start = left_margin + (usable_width - total_text_width) / 2 if total_text_width < usable_width else left_margin
+        pdf.set_xy(x_start, y_start)
+        for idx, seg in enumerate(segments):
+            link = links[idx]
+            if link:
+                pdf.set_text_color(0, 0, 255)
+            else:
+                pdf.set_text_color(0, 0, 0)
+            pdf.cell(text_widths[idx], line_height, seg, ln=0, align="C", link=link)
+            pdf.set_text_color(0, 0, 0)
+            if idx < len(segments) - 1:
+                pdf.cell(pdf.get_string_width(" | "), line_height, " | ", ln=0, align="C")
+        pdf.ln(line_height)
+
+    # Header rendering: use first non-empty as name, second non-empty as contact.
     pdf.set_xy(left_margin, top_margin)
     heading_count = 0
+    line_idx = 0
+    name_line = ""
+    contact_line = ""
+    for ln in safe_lines:
+        if ln.strip():
+            name_line = ln.strip()
+            break
+        line_idx += 1
+    line_idx += 1
+    for ln in safe_lines[line_idx:]:
+        if ln.strip():
+            contact_line = ln.strip()
+            break
+        line_idx += 1
 
+    if name_line:
+        name_line = re.sub(r"\s{2,}", " ", name_line)
+        pdf.set_font("Arial", "B", name_size)
+        pdf.cell(usable_width, line_height, name_line, ln=1, align="C")
+    if contact_line:
+        render_contact_line(contact_line)
+        y = pdf.get_y() + 1.5
+        pdf.line(left_margin, y, pdf.w - right_margin, y)
+        pdf.set_y(y + 3)
+
+    start_idx = 0
+    # Skip consumed lines
+    consumed = [name_line, contact_line]
     for idx, line in enumerate(safe_lines):
+        if line.strip() in consumed:
+            start_idx = idx + 1
+
+    expect_company_meta = False
+    education_keywords = [
+        "B.E. Computer Science Engineering",
+        "Computer Science Engineering - PESCOE",
+    ]
+
+    idx = start_idx
+    while idx < len(safe_lines):
+        line = safe_lines[idx]
         stripped = line.strip()
 
-        if idx == 0:
-            pdf.set_font("Arial", "B", name_size)
-            pdf.cell(usable_width, line_height, stripped, ln=1, align="C")
-            continue
-
-        if idx == 1 and ("@" in line or "|" in line or "+" in line):
-            pdf.set_font("Arial", "", font_size)
-            pdf.cell(usable_width, line_height, stripped, ln=1, align="C")
-            # Horizontal rule after contact
-            y = pdf.get_y() + 1
-            pdf.line(left_margin, y, pdf.w - right_margin, y)
-            pdf.set_y(y + 2)
-            continue
-
         if is_heading(stripped):
-            if heading_count >= 0:
-                y = pdf.get_y() + 1
+            y = pdf.get_y() + 1
+            if heading_count > 0:
                 pdf.line(left_margin, y, pdf.w - right_margin, y)
-                pdf.set_y(y + 2)
+            pdf.set_y(y + (2 if heading_count > 0 else 1))
             pdf.set_font("Arial", "B", heading_size)
             pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
             heading_count += 1
+            expect_company_meta = False
+            idx += 1
             continue
 
-        # Body text
-        pdf.set_font("Arial", "", font_size)
         if not stripped:
             pdf.ln(line_height)
-        else:
+            expect_company_meta = False
+            idx += 1
+            continue
+
+        if expect_company_meta:
+            pdf.set_font("Arial", "I", max(font_size - 0.5, 8))
+            pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
+            expect_company_meta = False
+            idx += 1
+            continue
+
+        is_education_line = any(keyword in stripped for keyword in education_keywords)
+
+        if is_company_role(stripped) and not is_education_line:
+            pdf.set_font("Arial", "B", heading_size - 1)
+            pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
+            expect_company_meta = True
+            idx += 1
+            continue
+
+        # Render bullet lines one-per-line without reflow.
+        if is_bullet_line(stripped):
+            pdf.set_font("Arial", "", font_size)
             pdf.cell(usable_width, line_height, stripped, ln=1, align="J")
+            expect_company_meta = False
+            idx += 1
+            continue
+
+        # Reflow normal body block to the same line count but fuller lines.
+        block = []
+        block_start = idx
+        while idx < len(safe_lines):
+            candidate = safe_lines[idx].strip()
+            if (
+                not candidate
+                or is_heading(candidate)
+                or (is_company_role(candidate) and not any(k in candidate for k in education_keywords))
+                or expect_company_meta
+                or is_bullet_line(candidate)
+            ):
+                break
+            block.append(candidate)
+            idx += 1
+
+        if not block:
+            idx += 1
+            continue
+
+        reflowed = reflow_block(block)
+        pdf.set_font("Arial", "", font_size)
+        for ln in reflowed:
+            pdf.cell(usable_width, line_height, ln, ln=1, align="J")
 
     pdf.output(filename)
     return filename
@@ -504,10 +663,17 @@ with col_generate:
                             "parmeetsingh.com", ""
                         ).replace("LinkedIn", "").strip()
 
+                if "granthi.parmeet@gmail.com" in updated_resume:
+                    updated_resume = updated_resume.replace(
+                        "granthi.parmeet@gmail.com", PRIMARY_EMAIL
+                    )
+
                 first_line = job_desc_for_generation.split("\n")[0].strip()
                 job_role = re.sub(r"[^A-Za-z0-9]+", "_", first_line) or "Role"
 
-                pdf_file = generate_pdf(updated_resume, job_role)
+                pdf_file = generate_pdf(
+                    updated_resume, job_role, st.session_state.get("selected_format")
+                )
                 with open(pdf_file, "rb") as pdf_handle:
                     pdf_bytes = pdf_handle.read()
 
