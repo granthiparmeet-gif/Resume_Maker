@@ -192,10 +192,10 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
 
-    left_margin = 15
-    right_margin = 15
+    left_margin = 7
+    right_margin = 7
     top_margin = 15
-    bottom_margin = 15
+    bottom_margin = 7
     pdf.set_margins(left_margin, top_margin, right_margin)
 
     available_height = pdf.h - top_margin - bottom_margin
@@ -373,6 +373,33 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         if not candidate:
             candidate = remainder[:1]
         return f"{prefix}{candidate}"
+
+    def enforce_skill_list_length(text_line: str) -> str:
+        """Drop the final skill when the category exceeds seven words after the colon."""
+        stripped = text_line.lstrip()
+        bullet_char = "-"
+        remainder = stripped
+        if stripped and stripped[0] in "-•*–":
+            bullet_char = stripped[0]
+            remainder = stripped[1:].lstrip()
+        if ":" not in remainder:
+            return text_line
+        category, skills = remainder.split(":", 1)
+        cleaned_skills = skills.strip()
+        if len(cleaned_skills.replace(",", " ").split()) <= 7:
+            return text_line
+        if "," in cleaned_skills:
+            segments = [seg.strip() for seg in cleaned_skills.split(",") if seg.strip()]
+            if len(segments) > 1:
+                segments = segments[:-1]
+            cleaned_skills = ", ".join(segments)
+        else:
+            words = cleaned_skills.split()
+            cleaned_skills = " ".join(words[:-1])
+        updated = cleaned_skills.strip()
+        if not updated:
+            return text_line
+        return f"{bullet_char} {category.strip()}: {updated}"
 
     def is_bullet_line(text_line: str) -> bool:
         stripped = text_line.lstrip()
@@ -584,6 +611,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         if in_skills_section and stripped:
             pdf.set_font("Arial", "", font_size)
             skill_entry = stripped if is_bullet_line(stripped) else f"- {stripped}"
+            skill_entry = enforce_skill_list_length(skill_entry)
             bullet_line = format_single_line_bullet(skill_entry)
             render_line, bold, _ = detect_bold_line(bullet_line)
             pdf.set_font("Arial", "B" if bold else "", font_size)
@@ -705,17 +733,23 @@ FORMAT_STYLES = {
     },
 }
 
+
 EXPERIENCE_GUIDELINES = """
 - Every experience bullet must quantify its impact with concrete metrics (percentages, time saved, revenue lifted, downtime reduced, adoption increased, etc.). If the exact number is not stated, infer a realistic yet defensible metric from the job description and responsibilities.
-- Keep each employer aligned with its domain: the first company is a software/AI organization—highlight platform engineering, AI delivery, cloud scale, SLOs, or product impact. The second company is Kiran Engineering Works—showcase automation, embedded systems, mechanical-electrical integration, manufacturing throughput, or robotics improvements.
+- Keep each employer aligned with its domain: the first company is a software/AI organization - highlight platform engineering, AI delivery, cloud scale, SLOs, or product impact. The second company is Kiran Engineering Works - showcase automation, embedded systems, mechanical-electrical integration, manufacturing throughput, or robotics improvements.
 - Metrics must sound credible (e.g., "reduced deployment time 35%", "improved uptime to 99.3%", "cut calibration effort by 28%", "boosted analytics adoption 2.1x"). Avoid generic statements without measurable change.
+- When describing impact, do not default to percentages. Pick a meaningful, real-world metric (hours saved, tickets resolved, downtime avoided, etc.) that fits the work, and only use percentages when they feel natural.
+- Each impact statement must explain why the change mattered to the business; infer conservative but realistic numbers when exact data is missing and keep everything defensible in interviews.
+- Skip using cost figures; rely on hours, percentages, throughput, or other operational metrics tied to time or scale instead of INR or USD savings.
 - For the Experience-Focused layout, keep each bullet and the Core Skills row to one line; list the most pertinent skills first and drop any extra keywords that would push the row to a second line.
 - For the Experience-Focused layout, keep each bullet short enough to stay on one line; rewrite any sentence that would otherwise wrap so it is precise, impact-driven, and remains within the margins.
 - For the Experience-Focused layout, keep LTI - Larsen & Toubro Infotech Ltd. - Software Engineer to exactly four precise bullets and Kiran Engineering Works - AI & Software Engineer to seven to nine bullets, choosing fewer when the page is near full so the education entry stays visible.
-- For the Experience-Focused format in particular, keep every bullet short enough to stay on a single line, rewriting them to be precise, impact-first sentences so they never exceed the template’s column width.
+- For the Experience-Focused format in particular, keep every bullet short enough to stay on a single line, rewriting them to be precise, impact-first sentences so they never exceed the template's column width.
+- Always write each bullet as a standalone sentence that naturally fits within the right-hand margin, so no post-processing trimming is necessary to keep it one line.
+- Rewrite any bullet that risks wrapping so it already fits the margin; rely on rephrasing at the generation stage instead of post-processing cuts.
 - For the Experience-Focused layout, present exactly five Core Skills entries so the section maintains a consistent five-bullet appearance; choose the top skills that can stay on one line each.
-- Each Core Skills bullet should open with a category label followed by exactly four distinct, role-relevant keywords separated by commas so every bullet reads as “Category: Skill1, Skill2, Skill3, Skill4” while staying single-line.
-- When any of those keywords is a multi-word phrase, limit that bullet to three skills after the category so wording fits without wrapping.
+- Each Core Skills bullet should follow "Category: Skill1, Skill2, Skill3, Skill4" with exactly four keywords to keep the formatting uniform.
+- If any keyword is multi-word, list only three skills after the category to prevent wrapping.
 """.strip()
 
 SESSION_DEFAULTS = {
@@ -972,7 +1006,7 @@ def build_comment_clause(comment: str, role_keyword: str) -> str:
     if not normalized:
         return ""
     normalized = re.sub(
-        r"^(I am|I'm|I’m|I’M|I AM|I AM)(\s+)",
+        r"^(I am|I'm|I'm|I'M|I AM|I AM)(\s+)",
         "",
         normalized,
         flags=re.IGNORECASE,
@@ -1026,6 +1060,7 @@ def build_projects_block(role_keyword: str) -> list[str]:
     project_titles = [
         f"{role_keyword} Insight Sprint",
         f"{role_keyword} Reliability Loop",
+        f"{role_keyword} Automation Studio",
     ]
     bullets = [
         [
@@ -1035,6 +1070,10 @@ def build_projects_block(role_keyword: str) -> list[str]:
         [
             "Engineered a reliability loop that simulated failure modes to automate escalation and reduce manual downtimes.",
             "Documented observability handoffs and captured lessons about balancing safety, cost, and speed.",
+        ],
+        [
+            "Built an automation studio that chained deployment scripts into reusable workflows, cutting setup time and human error.",
+            "Mapped success criteria for each workflow and trained partners so the automation could scale without new hires.",
         ],
     ]
     block = ["", "Projects", ""]
