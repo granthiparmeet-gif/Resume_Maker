@@ -16,6 +16,8 @@ if not openai.api_key:
         "OPENAI_API_KEY is not set. Add it to your environment or the .env file before proceeding."
     )
 
+PROJECT_TITLE_PREFIX = "PROJECT_TITLE::"
+
 # -----------------------------
 # Load Resume Template From File
 # -----------------------------
@@ -249,6 +251,8 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     def detect_bold_line(text_line: str) -> tuple[str, bool]:
         """Return the cleaned text and whether it should be bold."""
         stripped = text_line.strip()
+        if stripped.startswith(PROJECT_TITLE_PREFIX):
+            return stripped[len(PROJECT_TITLE_PREFIX) :].strip(), True
         if (
             stripped.startswith("**")
             and stripped.endswith("**")
@@ -863,7 +867,7 @@ def build_projects_block(role_keyword: str) -> list[str]:
     ]
     block = ["", "Projects", ""]
     for title, bullet_set in zip(project_titles, bullets):
-        block.append(f"**{title}**")
+        block.append(f"{PROJECT_TITLE_PREFIX}{title}")
         for item in bullet_set:
             block.append(f"- {item}")
         block.append("")
