@@ -235,12 +235,6 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     # for the Experience-Focused layout so the text never shrinks.
     font_size = base_font_size
     pdf.set_font("Arial", size=font_size)
-    if selected_format != "Experience-Focused (No LinkedIn/Projects)":
-        max_line_width = max(pdf.get_string_width(line) for line in safe_lines if line.strip()) or 0
-        if max_line_width > usable_width:
-            scale = usable_width / max_line_width
-            font_size = max(7, round(base_font_size * scale, 1))
-            pdf.set_font("Arial", size=font_size)
 
     # Line height scaled to fill the page without overflow.
     line_height = available_height / total_lines
@@ -720,15 +714,16 @@ FORMAT_STYLES = {
             "Remove the LinkedIn link from the contact block and omit the Independent Projects section entirely. "
             "Reuse the reclaimed lines to expand company experience bullet points with richer impact and metrics. "
             "Preserve the original line count and section ordering; replace removed lines with richer experience content so formatting stays identical to the template."
-            "Make the Professional Summary a single experience-focused paragraph composed of exactly six sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
+            "Make the Professional Summary a single experience-focused paragraph composed of exactly eight sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
             "Weave in language that underscores ethics, responsibility, impact, and a problem-solving mindset so the paragraph reads as someone who believes in responsible change."
             "Ensure every experience bullet stays concise, precise, and within the page margins, leveraging strong numbers from the job description so they can be rendered on a single line without wrapping."
             "If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
             "Treat the Core Skills section the same way: list the most important skills first and omit any tokens that would force a second line so the entire row stays single line within the margins."
             "Keep the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to exactly four bullets and the Kiran Engineering Works - AI & Software Engineer section to seven to nine bullets; choose more bullets only when the final education line still fits on the last page, and drop to seven if adding extras would push that education entry off the page."
-            "Insert a Projects subsection immediately after the Experience section (after LTI) with two role-aligned initiatives, each titled in bold and supported by two concise impact bullets."
-            "Clarify that the six sentences should naturally occupy six lines in the Experience-Focused PDF; rewrite sentences if needed to avoid wrapping and maintain the single-line bullet rule."
-            "Avoid inserting literal labels such as 'Description:' or 'Summary:' inside the Professional Summary; the paragraph should flow as natural sentences without prefatory keywords."
+            "Insert a Projects subsection immediately after the Experience section (after LTI) with three role-aligned initiatives, each titled in bold and supported by two concise impact bullets."
+            "Clarify that the eight sentences should naturally occupy eight lines in the Experience-Focused PDF; rewrite sentences if needed to avoid wrapping and maintain the single-line bullet rule."
+            "Avoid inserting literal labels such as 'Description:', 'Summary:', or 'Role:' inside the Professional Summary; the paragraph should flow as natural sentences without prefatory keywords."
+            "Write each sentence with a human tone—vary cadence, use conversational transitions, and skip formulaic or overly technical boilerplate so the summary reads like a thoughtful narrative rather than generated copy."
         ),
     },
 }
@@ -1022,8 +1017,11 @@ def build_comment_clause(comment: str, role_keyword: str) -> str:
 
 
 def clean_summary_labels(text: str) -> str:
-    """Strip label prefixes such as 'Description:' at the start of summary lines."""
-    pattern = re.compile(r"^\s*(?:description|summary|professional summary|overview)\s*:\s*", re.IGNORECASE)
+    """Strip label prefixes such as 'Description:' or 'Role:' at the start of summary lines."""
+    pattern = re.compile(
+        r"^\s*(?:description|summary|professional summary|overview|role|position|job title)\s*:\s*",
+        re.IGNORECASE,
+    )
     lines = text.split("\n")
     summary_idx = next(
         (idx for idx, ln in enumerate(lines) if ln.strip().lower() == "professional summary"),
