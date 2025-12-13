@@ -505,6 +505,7 @@ SESSION_DEFAULTS = {
     "pdf_filename": "",
     "pdf_bytes": None,
     "selected_format": "Experience-Focused (No LinkedIn/Projects)",
+    "resume_comment": "",
 }
 for key, value in SESSION_DEFAULTS.items():
     st.session_state.setdefault(key, value)
@@ -531,6 +532,17 @@ if format_option != st.session_state.get("selected_format"):
     st.session_state["pdf_bytes"] = None
 
 st.caption(FORMAT_STYLES[format_option]["description"])
+
+if format_option == "Experience-Focused (No LinkedIn/Projects)":
+    resume_comment = st.text_area(
+        "Optional note to weave into the Experience-Focused resume",
+        value=st.session_state.get("resume_comment", ""),
+        help="If you provide a short comment, the generator will integrate it somewhere in the resume content (summary, experience bullet, or skills) instead of creating a separate section.",
+        height=80,
+    )
+    st.session_state["resume_comment"] = resume_comment
+else:
+    st.session_state.setdefault("resume_comment", "")
 
 
 def reset_workflow():
@@ -726,6 +738,44 @@ def enforce_projects_block(text):
         lines = lines[:start] + canonical + lines[end:]
     else:
         lines.extend([""] + canonical)
+        return "\n".join(lines)
+
+
+def inject_comment_into_summary(text: str, comment: str) -> str:
+    """Append a user comment to the last Professional Summary sentence when needed."""
+    if not comment:
+        return text
+    normalized_comment = " ".join(comment.strip().split())
+    if not normalized_comment:
+        return text
+    lower_text = text.lower()
+    if normalized_comment.lower() in lower_text:
+        return text
+
+    lines = text.split("\n")
+    summary_idx = next(
+        (idx for idx, ln in enumerate(lines) if ln.strip().lower() == "professional summary"),
+        None,
+    )
+    if summary_idx is None:
+        return text
+
+    last_summary_line = None
+    for idx in range(summary_idx + 1, len(lines)):
+        if not lines[idx].strip():
+            break
+        last_summary_line = idx
+
+    if last_summary_line is None:
+        return text
+
+    comment_sentence = normalized_comment
+    if not comment_sentence.endswith((".", "?", "!")):
+        comment_sentence += "."
+    if comment_sentence[0].islower():
+        comment_sentence = comment_sentence[0].upper() + comment_sentence[1:]
+
+    lines[last_summary_line] = lines[last_summary_line].rstrip() + " " + comment_sentence
     return "\n".join(lines)
 
 
@@ -788,20 +838,29 @@ with col_generate:
                 updated_resume = None
                 pdf_file = ""
                 pdf_bytes = None
+                selected_format = st.session_state.get("selected_format")
+                style_instructions = FORMAT_STYLES[selected_format]["instructions"]
+                comment_value = st.session_state.get("resume_comment", "").strip()
+                if comment_value and selected_format == "Experience-Focused (No LinkedIn/Projects)":
+                    style_instructions += (
+                        "\nInclude the following user emphasis somewhere naturally in the resume (summary, a bullet, or skills) without creating a standalone comment section: "
+                        f"\"{comment_value}\""
+                    )
 
                 with st.spinner("Generating resume…"):
                     updated_resume = generate_resume_text(
                         job_desc_for_generation,
                         TEMPLATE_TEXT,
-                        FORMAT_STYLES[st.session_state.get("selected_format")][
-                            "instructions"
-                        ],
+                        style_instructions,
                     )
 
-                    if st.session_state.get("selected_format") == "Experience-Focused (No LinkedIn/Projects)":
+                    if selected_format == "Experience-Focused (No LinkedIn/Projects)":
                         updated_resume = updated_resume.replace(
                             "parmeetsingh.com", ""
                         ).replace("LinkedIn", "").strip()
+                        updated_resume = inject_comment_into_summary(
+                            updated_resume, comment_value
+                        )
 
                     if st.session_state.get("selected_format") == "LinkedIn + Projects":
                         updated_resume = enforce_projects_block(updated_resume)
