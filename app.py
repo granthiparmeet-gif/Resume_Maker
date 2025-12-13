@@ -66,7 +66,7 @@ def extract_text_from_pdf(source):
         ).rstrip()
         tokens = raw.replace("\n", " ").split()
         combined = " ".join(tokens)
-        return textwrap.fill(combined, width=90, break_long_words=False)
+        return textwrap.fill(combined, width=75, break_long_words=False)
     finally:
         if close_after:
             source.close()
@@ -220,7 +220,16 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             return f"{PROJECT_TITLE_PREFIX}{match.group(1).strip()}"
         return line
 
-    safe_lines = [normalize_project_heading_line(ln) for ln in safe_lines]
+    def limit_line_width(line: str) -> str:
+        """Limit lines to ~75 characters using textwrap.fill while keeping a single line."""
+        if not line.strip():
+            return line
+        wrapped = textwrap.fill(line, width=75, break_long_words=False)
+        return " ".join(wrapped.splitlines())
+
+    safe_lines = [
+        limit_line_width(normalize_project_heading_line(ln)) for ln in safe_lines
+    ]
 
     # Determine body font size to fit longest line within width, but keep standard size
     # for the Experience-Focused layout so the text never shrinks.
@@ -240,6 +249,9 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         line_height = min_line_height
     if line_height * total_lines > available_height:
         line_height = available_height / total_lines
+
+    BULLET_MARGIN_RATIO = 0.15
+    bullet_width_limit = usable_width * (1 - BULLET_MARGIN_RATIO)
 
     blank_line_height = (
         line_height * 0.5
@@ -336,6 +348,31 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             prefix = f"{bullet_char} " if idx == 0 else "  "
             lines.append(f"{prefix}{segment}")
         return lines
+
+    def format_single_line_bullet(text_line: str) -> str:
+        """Shrink a bullet entry so it fits on exactly one line within the usable width."""
+        stripped = text_line.lstrip()
+        bullet_char = "-"
+        remainder = stripped
+        if stripped and stripped[0] in "-•*–":
+            bullet_char = stripped[0]
+            remainder = stripped[1:].lstrip()
+        if not remainder:
+            return f"{bullet_char} "
+        prefix = f"{bullet_char} "
+        pdf.set_font("Arial", "", font_size)
+        words = remainder.split()
+        candidate = " ".join(words)
+        while words and pdf.get_string_width(prefix + candidate) > bullet_width_limit:
+            words.pop()
+            candidate = " ".join(words)
+        if not words:
+            candidate = remainder
+        while candidate and pdf.get_string_width(prefix + candidate) > bullet_width_limit:
+            candidate = candidate[:-1].rstrip()
+        if not candidate:
+            candidate = remainder[:1]
+        return f"{prefix}{candidate}"
 
     def is_bullet_line(text_line: str) -> bool:
         stripped = text_line.lstrip()
@@ -483,6 +520,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
 
     idx = start_idx
     project_heading_count = 0
+    in_skills_section = False
     while idx < len(safe_lines):
         line = safe_lines[idx]
         stripped = line.strip()
@@ -510,6 +548,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             heading_count += 1
             expect_company_meta = False
             current_section = stripped
+            in_skills_section = stripped.lower() in {"core skills", "skills"}
             idx += 1
             continue
 
@@ -529,6 +568,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
                 continue
             pdf.ln(blank_line_height)
             expect_company_meta = False
+            in_skills_section = False
             idx += 1
             continue
 
@@ -540,6 +580,18 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             continue
 
         is_education_line = any(keyword in stripped for keyword in education_keywords)
+
+        if in_skills_section and stripped:
+            pdf.set_font("Arial", "", font_size)
+            skill_entry = stripped if is_bullet_line(stripped) else f"- {stripped}"
+            bullet_line = format_single_line_bullet(skill_entry)
+            render_line, bold, _ = detect_bold_line(bullet_line)
+            pdf.set_font("Arial", "B" if bold else "", font_size)
+            pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
+            pdf.set_font("Arial", "", font_size)
+            expect_company_meta = False
+            idx += 1
+            continue
 
         if is_company_role(stripped) and not is_education_line:
             pdf.set_font("Arial", "B", heading_size - 1)
@@ -661,6 +713,9 @@ EXPERIENCE_GUIDELINES = """
 - For the Experience-Focused layout, keep each bullet short enough to stay on one line; rewrite any sentence that would otherwise wrap so it is precise, impact-driven, and remains within the margins.
 - For the Experience-Focused layout, keep LTI - Larsen & Toubro Infotech Ltd. - Software Engineer to exactly four precise bullets and Kiran Engineering Works - AI & Software Engineer to seven to nine bullets, choosing fewer when the page is near full so the education entry stays visible.
 - For the Experience-Focused format in particular, keep every bullet short enough to stay on a single line, rewriting them to be precise, impact-first sentences so they never exceed the template’s column width.
+- For the Experience-Focused layout, present exactly five Core Skills entries so the section maintains a consistent five-bullet appearance; choose the top skills that can stay on one line each.
+- Each Core Skills bullet should open with a category label followed by exactly four distinct, role-relevant keywords separated by commas so every bullet reads as “Category: Skill1, Skill2, Skill3, Skill4” while staying single-line.
+- When any of those keywords is a multi-word phrase, limit that bullet to three skills after the category so wording fits without wrapping.
 """.strip()
 
 SESSION_DEFAULTS = {
