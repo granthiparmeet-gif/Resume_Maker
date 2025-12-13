@@ -87,7 +87,7 @@ def sanitize_job_role_candidate(role_text: str) -> str:
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
     if not cleaned:
         return "Software Engineer"
-    return cleaned.title()
+    return cleaned
 
 
 # -----------------------------
@@ -491,12 +491,13 @@ FORMAT_STYLES = {
             "Remove the LinkedIn link from the contact block and omit the Independent Projects section entirely. "
             "Reuse the reclaimed lines to expand company experience bullet points with richer impact and metrics. "
             "Preserve the original line count and section ordering; replace removed lines with richer experience content so formatting stays identical to the template."
-            "Make the Professional Summary a single experience-focused paragraph composed of exactly eight sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
+            "Make the Professional Summary a single experience-focused paragraph composed of exactly six sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
             "Weave in language that underscores ethics, responsibility, impact, and a problem-solving mindset so the paragraph reads as someone who believes in responsible change."
             "Ensure every experience bullet stays concise, precise, and within the page margins, leveraging strong numbers from the job description so they can be rendered on a single line without wrapping."
             "If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
             "Treat the Core Skills section the same way: list the most important skills first and omit any tokens that would force a second line so the entire row stays single line within the margins."
             "Keep the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to exactly four bullets and the Kiran Engineering Works - AI & Software Engineer section to seven to nine bullets; choose more bullets only when the final education line still fits on the last page, and drop to seven if adding extras would push that education entry off the page."
+            "Clarify that the six sentences should naturally occupy six lines in the Experience-Focused PDF; rewrite sentences if needed to avoid wrapping and maintain the single-line bullet rule."
             "Avoid inserting literal labels such as 'Description:' or 'Summary:' inside the Professional Summary; the paragraph should flow as natural sentences without prefatory keywords."
         ),
     },
@@ -805,6 +806,16 @@ def clean_summary_labels(text: str) -> str:
     return "\n".join(lines)
 
 
+def rewrite_kiran_role_line(text: str, role_keyword: str) -> str:
+    """Ensure the Kiran Engineering Works heading refers to the target job role only."""
+    if not role_keyword:
+        return text
+    pattern = re.compile(r"(Kiran Engineering Works\s*[–—-]\s*)(.+)", re.IGNORECASE)
+    def repl(match):
+        return f"{match.group(1)}{role_keyword}"
+    return pattern.sub(repl, text, count=1)
+
+
 def inject_comment_into_summary(text: str, comment: str, role_keyword: str) -> str:
     """Append a user comment clause to the last Professional Summary sentence when strategic."""
     clause = build_comment_clause(comment, role_keyword)
@@ -929,6 +940,9 @@ with col_generate:
                             updated_resume, comment_value, role_keyword
                         )
                         updated_resume = clean_summary_labels(updated_resume)
+                        updated_resume = rewrite_kiran_role_line(
+                            updated_resume, role_keyword
+                        )
 
                     if st.session_state.get("selected_format") == "LinkedIn + Projects":
                         updated_resume = enforce_projects_block(updated_resume)
