@@ -131,6 +131,12 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     if line_height * total_lines > available_height:
         line_height = available_height / total_lines
 
+    blank_line_height = (
+        line_height * 0.5
+        if selected_format == "Experience-Focused (No LinkedIn/Projects)"
+        else line_height
+    )
+
     name_size = max(font_size + 6, 16)
     heading_size = max(font_size + 2, font_size * 1.2)
 
@@ -275,7 +281,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.set_text_color(0, 0, 0)
             if idx < len(segments) - 1:
                 pdf.cell(pdf.get_string_width(" | "), line_height, " | ", ln=0, align="C")
-        pdf.ln(line_height)
+        pdf.ln(blank_line_height)
 
     def render_body_line(line_text: str):
         # Detect a single URL-like token for hyperlinking.
@@ -310,15 +316,19 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             break
         line_idx += 1
 
+    no_line_after_contact = selected_format == "Experience-Focused (No LinkedIn/Projects)"
     if name_line:
         name_line = re.sub(r"\s{2,}", " ", name_line)
         pdf.set_font("Arial", "B", name_size)
         pdf.cell(usable_width, line_height, name_line, ln=1, align="C")
     if contact_line:
         render_contact_line(contact_line)
-        y = pdf.get_y() + 1.5
-        pdf.line(left_margin, y, pdf.w - right_margin, y)
-        pdf.set_y(y + 3)
+        y = pdf.get_y() + (1.0 if no_line_after_contact else 1.5)
+        if not no_line_after_contact:
+            pdf.line(left_margin, y, pdf.w - right_margin, y)
+            pdf.set_y(y + 3)
+        else:
+            pdf.set_y(y + 1)
 
     start_idx = 0
     # Skip consumed lines
@@ -365,7 +375,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             ):
                 idx += 1
                 continue
-            pdf.ln(line_height)
+            pdf.ln(blank_line_height)
             expect_company_meta = False
             idx += 1
             continue
@@ -465,11 +475,12 @@ FORMAT_STYLES = {
             "Remove the LinkedIn link from the contact block and omit the Independent Projects section entirely. "
             "Reuse the reclaimed lines to expand company experience bullet points with richer impact and metrics. "
             "Preserve the original line count and section ordering; replace removed lines with richer experience content so formatting stays identical to the template."
-            " Make the Professional Summary a single experience-focused paragraph composed of exactly six sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
+            "Make the Professional Summary a single experience-focused paragraph composed of exactly six sentences that align with the job description and keep the document length equal to the template, while omitting any LinkedIn or project references. "
             "Weave in language that underscores ethics, responsibility, impact, and a problem-solving mindset so the paragraph reads as someone who believes in responsible change."
-            "Ensure every experience bullet stays concise, precise, and within the page margins, leveraging strong numbers from the job description so the text never overruns the column."
-            " If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
-            " Limit the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to three bullets and the Kiran Engineering Works - AI & Software Engineer section to seven bullets so the generated resume matches the requested detail level."
+            "Ensure every experience bullet stays concise, precise, and within the page margins, leveraging strong numbers from the job description so they can be rendered on a single line without wrapping."
+            "If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
+            "Treat the Core Skills section the same way: list the most important skills first and omit any tokens that would force a second line so the entire row stays single line within the margins."
+            "Limit the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to three bullets and the Kiran Engineering Works - AI & Software Engineer section to seven to nine bullets; choose more bullets only when the final education line still fits on the last page, and drop to seven if adding extras would push that education entry off the page."
         ),
     },
 }
@@ -478,7 +489,9 @@ EXPERIENCE_GUIDELINES = """
 - Every experience bullet must quantify its impact with concrete metrics (percentages, time saved, revenue lifted, downtime reduced, adoption increased, etc.). If the exact number is not stated, infer a realistic yet defensible metric from the job description and responsibilities.
 - Keep each employer aligned with its domain: the first company is a software/AI organization—highlight platform engineering, AI delivery, cloud scale, SLOs, or product impact. The second company is Kiran Engineering Works—showcase automation, embedded systems, mechanical-electrical integration, manufacturing throughput, or robotics improvements.
 - Metrics must sound credible (e.g., "reduced deployment time 35%", "improved uptime to 99.3%", "cut calibration effort by 28%", "boosted analytics adoption 2.1x"). Avoid generic statements without measurable change.
-- For the Experience-Focused layout, keep LTI - Larsen & Toubro Infotech Ltd. - Software Engineer to three precise bullets and Kiran Engineering Works - AI & Software Engineer to seven bullets so the detail remains focused.
+- For the Experience-Focused layout, keep each bullet and the Core Skills row to one line; list the most pertinent skills first and drop any extra keywords that would push the row to a second line.
+- For the Experience-Focused layout, keep each bullet short enough to stay on one line; rewrite any sentence that would otherwise wrap so it is precise, impact-driven, and remains within the margins.
+- For the Experience-Focused layout, keep LTI - Larsen & Toubro Infotech Ltd. - Software Engineer to three precise bullets and Kiran Engineering Works - AI & Software Engineer to seven to nine bullets, choosing fewer when the page is near full so the education entry stays visible.
 - For the Experience-Focused format in particular, keep every bullet short enough to stay on a single line, rewriting them to be precise, impact-first sentences so they never exceed the template’s column width.
 """.strip()
 

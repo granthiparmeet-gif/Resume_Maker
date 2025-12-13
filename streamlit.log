@@ -9,3 +9,21 @@
   $ xcode-select --install
   $ pip install watchdog
             
+2025-12-12 16:05:52.429 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/parmeetsingh/Desktop/Resume Maker/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/parmeetsingh/Desktop/Resume Maker/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 671, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/parmeetsingh/Desktop/Resume Maker/app.py", line 733, in <module>
+    pdf_file = generate_pdf(
+        updated_resume, job_role, st.session_state.get("selected_format")
+    )
+  File "/Users/parmeetsingh/Desktop/Resume Maker/app.py", line 366, in generate_pdf
+    pdf.output(filename)
+    ~~~~~~~~~~^^^^^^^^^^
+  File "/Users/parmeetsingh/Desktop/Resume Maker/.venv/lib/python3.13/site-packages/fpdf/fpdf.py", line 1079, in output
+    f=open(name,'wb')
+OSError: [Errno 63] File name too long: 'Parmeet_Singh_Our_engineering_team_builds_technology_that_is_a_completely_unique_embedded_financing_solution_empowering_any_company_to_offer_investment_mortgages_and_B2B2C_connectivity_between_lenders_their_customers_and_the_capital_markets_If_you_join_our_team_you_will_work_on_industry_transforming_products_including_.pdf'
+  Stopping...
