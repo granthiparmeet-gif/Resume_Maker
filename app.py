@@ -17,6 +17,8 @@ if not openai.api_key:
     )
 
 PROJECT_TITLE_PREFIX = "PROJECT_TITLE::"
+BOLD_DETECTION_PATTERN = re.compile(r"\*\*\s*(.+?)\s*\*\*")
+PROJECT_TITLE_BOLD_PATTERN = re.compile(r"^\*\s*\*\s*(.+?)\s*\*\*\s*$")
 
 # -----------------------------
 # Load Resume Template From File
@@ -92,6 +94,87 @@ def sanitize_job_role_candidate(role_text: str) -> str:
     return cleaned
 
 
+ROLE_INDICATORS = {
+    "engineer",
+    "developer",
+    "architect",
+    "scientist",
+    "analyst",
+    "specialist",
+    "consultant",
+    "tester",
+    "qa",
+    "technician",
+    "manager",
+    "lead",
+    "director",
+    "officer",
+    "designer",
+    "programmer",
+    "coordinator",
+    "administrator",
+    "researcher",
+    "developer",
+}
+
+
+def infer_job_role_from_description(description: str) -> str | None:
+    """Return a plausible job role phrase from the description."""
+    if not description:
+        return None
+
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    label_pattern = re.compile(r"(?:Job Title|Role|Position)\s*[:\-]\s*(.+)", re.IGNORECASE)
+    for line in lines:
+        match = label_pattern.match(line)
+        if match:
+            return match.group(1).strip()
+
+    desc_pattern = re.compile(
+        r"^\s*(?:As\s+)?(?:a|an|the)\s+(.+?)(?:,| who\b| that\b| will\b| for\b| in\b| on\b| where\b|$)",
+        re.IGNORECASE,
+    )
+    for line in lines:
+        match = desc_pattern.match(line)
+        if match:
+            return match.group(1).strip()
+
+    word_pattern = re.compile(r"[A-Za-z&/+-]+")
+    for line in lines:
+        words = word_pattern.findall(line)
+        for window_size in range(min(5, len(words)), 1, -1):
+            for start in range(0, len(words) - window_size + 1):
+                window = words[start : start + window_size]
+                lower_words = [word.lower() for word in window]
+                if any(indicator in word for word in lower_words for indicator in ROLE_INDICATORS):
+                    if set(lower_words) & {"role", "job", "responsibilities", "responsibility"}:
+                        continue
+                    return " ".join(window)
+    return None
+
+
+def extract_kiran_role_from_description(description: str) -> str | None:
+    """Extract the role reference seeded near Kiran Engineering Works when possible."""
+    if not description:
+        return None
+    pattern = re.compile(r"Kiran Engineering Works\s*[–—-]\s*([^\n\r]+)", re.IGNORECASE)
+    match = pattern.search(description)
+    if match:
+        fragment = match.group(1).strip()
+        fragment = re.sub(
+            r"^(?:As\s+)?(?:a|an|the)\s+", "", fragment, flags=re.IGNORECASE
+        )
+        split_pattern = re.compile(
+            r",|\bwho\b|\bwill\b|\bwhere\b|\bthat\b|\bin\b|\bfor\b|\bat\b", re.IGNORECASE
+        )
+        role_text = re.split(split_pattern, fragment, maxsplit=1)[0].strip()
+        role_text = role_text.strip(":-–— ")
+        words = role_text.split()
+        if words:
+            return " ".join(words[:5])
+    return infer_job_role_from_description(description)
+
+
 # -----------------------------
 # PDF Generator
 # -----------------------------
@@ -130,6 +213,15 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
 
     safe_lines = [normalize_line(line) for line in lines]
 
+    def normalize_project_heading_line(line: str) -> str:
+        stripped = line.strip()
+        match = PROJECT_TITLE_BOLD_PATTERN.match(stripped)
+        if match:
+            return f"{PROJECT_TITLE_PREFIX}{match.group(1).strip()}"
+        return line
+
+    safe_lines = [normalize_project_heading_line(ln) for ln in safe_lines]
+
     # Determine body font size to fit longest line within width, but keep standard size
     # for the Experience-Focused layout so the text never shrinks.
     font_size = base_font_size
@@ -157,6 +249,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
 
     name_size = max(font_size + 6, 16)
     heading_size = max(font_size + 2, font_size * 1.2)
+    project_heading_size = max(font_size, heading_size * 0.75)
 
     def is_heading(text_line: str) -> bool:
         stripped = text_line.strip()
@@ -248,18 +341,20 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         stripped = text_line.lstrip()
         return stripped.startswith(("-", "•", "*", "–"))
 
-    def detect_bold_line(text_line: str) -> tuple[str, bool]:
-        """Return the cleaned text and whether it should be bold."""
+    def detect_bold_line(text_line: str) -> tuple[str, bool, bool]:
+        """Return the cleaned text and whether it should be bold or treated as a project title."""
         stripped = text_line.strip()
         if stripped.startswith(PROJECT_TITLE_PREFIX):
-            return stripped[len(PROJECT_TITLE_PREFIX) :].strip(), True
-        if (
-            stripped.startswith("**")
-            and stripped.endswith("**")
-            and len(stripped) > 4
-        ):
-            return stripped[2:-2].strip(), True
-        return text_line, False
+            return stripped[len(PROJECT_TITLE_PREFIX) :].strip(), True, True
+        match = BOLD_DETECTION_PATTERN.search(text_line)
+        if match:
+            cleaned_line = (
+                text_line[: match.start()]
+                + match.group(1)
+                + text_line[match.end() :]
+            )
+            return cleaned_line, True, False
+        return text_line, False, False
 
     def render_contact_line(line_text: str):
         segments = [seg.strip() for seg in line_text.split("|") if seg.strip()]
@@ -387,9 +482,21 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     ]
 
     idx = start_idx
+    project_heading_count = 0
     while idx < len(safe_lines):
         line = safe_lines[idx]
         stripped = line.strip()
+
+        render_line, _, is_project_title = detect_bold_line(line)
+        if is_project_title and stripped:
+            if project_heading_count > 0:
+                pdf.ln(blank_line_height)
+            pdf.set_font("Arial", "B", project_heading_size)
+            pdf.cell(usable_width, line_height, render_line, ln=1, align="L")
+            pdf.set_font("Arial", "", font_size)
+            idx += 1
+            project_heading_count += 1
+            continue
 
         if is_heading(stripped):
             y = pdf.get_y() + 1
@@ -398,6 +505,8 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.set_y(y + (2 if heading_count > 0 else 1))
             pdf.set_font("Arial", "B", heading_size)
             pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
+            if stripped.lower() == "projects":
+                pdf.ln(blank_line_height)
             heading_count += 1
             expect_company_meta = False
             current_section = stripped
@@ -444,7 +553,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.set_font("Arial", "", font_size)
             bullet_lines = wrap_bullet_line(stripped)
             for bullet in bullet_lines:
-                render_line, bold = detect_bold_line(bullet)
+                render_line, bold, _ = detect_bold_line(bullet)
                 pdf.set_font("Arial", "B" if bold else "", font_size)
                 pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
             pdf.set_font("Arial", "", font_size)
@@ -480,9 +589,17 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             lines_to_render = reflow_block(block)
 
         for ln in lines_to_render:
-            render_line, bold = detect_bold_line(ln)
-            pdf.set_font("Arial", "B" if bold else "", font_size)
-            pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
+            render_line, bold, is_project_title = detect_bold_line(ln)
+            if is_project_title:
+                if project_heading_count > 0:
+                    pdf.ln(blank_line_height)
+                pdf.set_font("Arial", "B", project_heading_size)
+                pdf.cell(usable_width, line_height, render_line, ln=1, align="L")
+                project_heading_count += 1
+            else:
+                pdf.set_font("Arial", "B" if bold else "", font_size)
+                pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
+            pdf.set_font("Arial", "", font_size)
         pdf.set_font("Arial", "", font_size)
 
     pdf.output(filename)
@@ -983,8 +1100,12 @@ with col_generate:
                 role_keyword = "Software Engineer"
                 role_instruction = ""
                 if selected_format == "Experience-Focused (No LinkedIn/Projects)":
-                    raw_role_line = job_desc_for_generation.split("\n")[0].strip()
-                    role_keyword = sanitize_job_role_candidate(raw_role_line)
+                    kiran_role = extract_kiran_role_from_description(job_desc_for_generation)
+                    if kiran_role:
+                        role_keyword = sanitize_job_role_candidate(kiran_role)
+                    else:
+                        raw_role_line = job_desc_for_generation.split("\n")[0].strip()
+                        role_keyword = sanitize_job_role_candidate(raw_role_line)
                     role_instruction = (
                         "\nEnsure the Professional Summary begins with "
                         f"'{role_keyword}' and stays focused on that functional role without defaulting to AI/ML unless the job description explicitly calls for it."
