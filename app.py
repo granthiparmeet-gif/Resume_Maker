@@ -246,6 +246,17 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         stripped = text_line.lstrip()
         return stripped.startswith(("-", "•", "*", "–"))
 
+    def detect_bold_line(text_line: str) -> tuple[str, bool]:
+        """Return the cleaned text and whether it should be bold."""
+        stripped = text_line.strip()
+        if (
+            stripped.startswith("**")
+            and stripped.endswith("**")
+            and len(stripped) > 4
+        ):
+            return stripped[2:-2].strip(), True
+        return text_line, False
+
     def render_contact_line(line_text: str):
         segments = [seg.strip() for seg in line_text.split("|") if seg.strip()]
         if selected_format == "Experience-Focused (No LinkedIn/Projects)":
@@ -310,8 +321,20 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.set_text_color(0, 0, 255)
         else:
             pdf.set_text_color(0, 0, 0)
-        pdf.cell(usable_width, line_height, line_text, ln=1, align="J", link=link)
+        render_text = line_text
+        bold_mode = False
+        if (
+            line_text.startswith("**")
+            and line_text.endswith("**")
+            and len(line_text) > 4
+        ):
+            render_text = line_text[2:-2].strip()
+            bold_mode = True
+        pdf.set_font("Arial", "B" if bold_mode else "", font_size)
+        pdf.cell(usable_width, line_height, render_text, ln=1, align="J", link=link)
         pdf.set_text_color(0, 0, 0)
+        if bold_mode:
+            pdf.set_font("Arial", "", font_size)
 
     # Header rendering: use first non-empty as name, second non-empty as contact.
     pdf.set_xy(left_margin, top_margin)
@@ -366,7 +389,7 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
 
         if is_heading(stripped):
             y = pdf.get_y() + 1
-            if heading_count > 0:
+            if heading_count > 0 and stripped.lower() != "projects":
                 pdf.line(left_margin, y, pdf.w - right_margin, y)
             pdf.set_y(y + (2 if heading_count > 0 else 1))
             pdf.set_font("Arial", "B", heading_size)
@@ -417,7 +440,10 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
             pdf.set_font("Arial", "", font_size)
             bullet_lines = wrap_bullet_line(stripped)
             for bullet in bullet_lines:
-                pdf.cell(usable_width, line_height, bullet, ln=1, align="J")
+                render_line, bold = detect_bold_line(bullet)
+                pdf.set_font("Arial", "B" if bold else "", font_size)
+                pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
+            pdf.set_font("Arial", "", font_size)
             expect_company_meta = False
             idx += 1
             continue
@@ -449,9 +475,11 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         else:
             lines_to_render = reflow_block(block)
 
-        pdf.set_font("Arial", "", font_size)
         for ln in lines_to_render:
-            pdf.cell(usable_width, line_height, ln, ln=1, align="J")
+            render_line, bold = detect_bold_line(ln)
+            pdf.set_font("Arial", "B" if bold else "", font_size)
+            pdf.cell(usable_width, line_height, render_line, ln=1, align="J")
+        pdf.set_font("Arial", "", font_size)
 
     pdf.output(filename)
     return filename
@@ -497,6 +525,7 @@ FORMAT_STYLES = {
             "If a bullet would overflow the width, rewrite it to be shorter—capture the impact in one sentence that fits on a single line without wrapping."
             "Treat the Core Skills section the same way: list the most important skills first and omit any tokens that would force a second line so the entire row stays single line within the margins."
             "Keep the LTI - Larsen & Toubro Infotech Ltd. - Software Engineer section to exactly four bullets and the Kiran Engineering Works - AI & Software Engineer section to seven to nine bullets; choose more bullets only when the final education line still fits on the last page, and drop to seven if adding extras would push that education entry off the page."
+            "Insert a Projects subsection immediately after the Experience section (after LTI) with two role-aligned initiatives, each titled in bold and supported by two concise impact bullets."
             "Clarify that the six sentences should naturally occupy six lines in the Experience-Focused PDF; rewrite sentences if needed to avoid wrapping and maintain the single-line bullet rule."
             "Avoid inserting literal labels such as 'Description:' or 'Summary:' inside the Professional Summary; the paragraph should flow as natural sentences without prefatory keywords."
         ),
@@ -816,6 +845,31 @@ def rewrite_kiran_role_line(text: str, role_keyword: str) -> str:
     return pattern.sub(repl, text, count=1)
 
 
+def build_projects_block(role_keyword: str) -> list[str]:
+    """Generate the Projects subsection text that follows LTI in Experience-Focused resumes."""
+    project_titles = [
+        f"{role_keyword} Insight Sprint",
+        f"{role_keyword} Reliability Loop",
+    ]
+    bullets = [
+        [
+            "Delivered a multi-source insight sprint that aligned operations telemetry, tackling inconsistent signals by standardizing collection flows.",
+            "Solved the decision lag for leadership, learning to negotiate instrumentation trade-offs while keeping trust high.",
+        ],
+        [
+            "Engineered a reliability loop that simulated failure modes to automate escalation and reduce manual downtimes.",
+            "Documented observability handoffs and captured lessons about balancing safety, cost, and speed.",
+        ],
+    ]
+    block = ["", "Projects", ""]
+    for title, bullet_set in zip(project_titles, bullets):
+        block.append(f"**{title}**")
+        for item in bullet_set:
+            block.append(f"- {item}")
+        block.append("")
+    return block
+
+
 def inject_comment_into_summary(text: str, comment: str, role_keyword: str) -> str:
     """Append a user comment clause to the last Professional Summary sentence when strategic."""
     clause = build_comment_clause(comment, role_keyword)
@@ -844,6 +898,20 @@ def inject_comment_into_summary(text: str, comment: str, role_keyword: str) -> s
 
     lines[last_summary_line] = lines[last_summary_line].rstrip() + " " + clause
     return "\n".join(lines)
+
+
+def insert_projects_section(text: str, role_keyword: str) -> str:
+    """Insert the Projects block after the Experience section and before Education."""
+    lines = text.split("\n")
+    if any(ln.strip().lower() == "projects" for ln in lines):
+        return text
+    insert_idx = next(
+        (idx for idx, ln in enumerate(lines) if ln.strip() == "Education"), None
+    )
+    block = build_projects_block(role_keyword)
+    if insert_idx is None:
+        return "\n".join(lines + block)
+    return "\n".join(lines[:insert_idx] + block + lines[insert_idx:])
 
 
 # --- Workflow Controls ---
@@ -941,6 +1009,9 @@ with col_generate:
                         )
                         updated_resume = clean_summary_labels(updated_resume)
                         updated_resume = rewrite_kiran_role_line(
+                            updated_resume, role_keyword
+                        )
+                        updated_resume = insert_projects_section(
                             updated_resume, role_keyword
                         )
 
