@@ -252,7 +252,7 @@ def generate_pdf(
     if line_height * total_lines > available_height:
         line_height = available_height / total_lines
     if selected_format == "Experience-Focused (No LinkedIn/Projects)":
-        experience_line_height = min(line_height * 1.5, available_height / total_lines)
+        experience_line_height = min(line_height * 2, available_height / total_lines)
         if experience_line_height > line_height:
             line_height = experience_line_height
 
