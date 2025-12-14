@@ -3,6 +3,7 @@ import os
 import re
 import textwrap
 import math
+from datetime import date
 
 import openai
 import streamlit as st
@@ -178,12 +179,18 @@ def extract_kiran_role_from_description(description: str) -> str | None:
 # -----------------------------
 # PDF Generator
 # -----------------------------
-def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
+def generate_pdf(
+    text,
+    job_role,
+    selected_format="LinkedIn + Projects",
+    doc_label="resume",
+    fit_page=True,
+):
     tokens = [t for t in re.split(r"[_\s]+", job_role) if t]
     short_role = "_".join(tokens[:4]) if tokens else "Role"
     if len(short_role) > 40:
         short_role = short_role[:40].rstrip("_")
-    filename = f"Parmeet_Singh_{short_role}.pdf"
+    filename = f"Parmeet_Singh_{short_role}_{doc_label}.pdf"
     raw_lines = text.split("\n")
     lines = [ln for ln in raw_lines if ln is not None]
     total_lines = max(len(lines), 1)
@@ -239,10 +246,10 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     # Line height scaled to fill the page without overflow.
     line_height = available_height / total_lines
     min_line_height = font_size * 1.15
+    max_line_height = font_size * 1.5 if not fit_page else float("inf")
+    line_height = min(line_height, max_line_height)
     if line_height < min_line_height:
         line_height = min_line_height
-    if line_height * total_lines > available_height:
-        line_height = available_height / total_lines
 
     BULLET_MARGIN_RATIO = 0.15
     bullet_width_limit = usable_width * (1 - BULLET_MARGIN_RATIO)
@@ -680,6 +687,17 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     return filename
 
 
+def derive_file_role_label(description: str) -> str:
+    """Return a file-friendly role label derived from the first line of the job description."""
+    if not description:
+        return "Role"
+    first_line = description.strip().splitlines()[0].strip()
+    if not first_line:
+        return "Role"
+    sanitized = re.sub(r"[^A-Za-z0-9]+", "_", first_line)
+    return sanitized or "Role"
+
+
 # -----------------------------
 # Streamlit UI
 # -----------------------------
@@ -753,6 +771,10 @@ SESSION_DEFAULTS = {
     "job_desc_for_analysis": "",
     "resume_consent": False,
     "resume_generated": False,
+    "cover_letter": "",
+    "cover_letter_generated": False,
+    "cover_letter_pdf_filename": "",
+    "cover_letter_pdf_bytes": None,
     "updated_resume": "",
     "pdf_filename": "",
     "pdf_bytes": None,
@@ -795,12 +817,6 @@ if format_option == "Experience-Focused (No LinkedIn/Projects)":
     st.session_state["resume_comment"] = resume_comment
 else:
     st.session_state.setdefault("resume_comment", "")
-
-
-def reset_workflow():
-    for key, value in SESSION_DEFAULTS.items():
-        st.session_state[key] = value
-    st.rerun()
 
 
 def analyze_job_description(description):
@@ -957,6 +973,58 @@ Return only the updated resume with EXACTLY the same number of lines as the temp
     )
 
     return response.choices[0].message.content
+
+
+def generate_cover_letter_text(description: str) -> str:
+    """Create a cover letter referencing the job description in a standard format."""
+    if not description:
+        raise ValueError("Job description is required to build a cover letter.")
+
+    today_str = date.today().strftime("%B %d, %Y")
+    SYSTEM_COVER_PROMPT = """
+You are a professional cover letter writer. Use the incoming job description to craft a thoughtful,
+human-toned cover letter with a standard business structure (date, salutation, intro, body, closing, signature).
+Highlight the most relevant skills, responsibilities, and impact the candidate can bring to the role,
+and tie them back to the job description language. Include today's date at the top and sign the letter as
+Parmeet Singh. Avoid adding placeholder blocks like "[Company Address]" or "[Your Email Address]". If the company
+name is discoverable from the description, reference it in the greeting or opening sentence. Keep the tone confident,
+respectful, and aligned with the target job, avoiding robotic phrasing. Return only the cover letter text without explanations.
+""".strip()
+
+    USER_COVER_PROMPT = f"""
+Date: {today_str}
+
+[JOB DESCRIPTION]
+{description}
+
+[INSTRUCTIONS]
+- Stay within one-page letter convention and write 3 paragraphs (intro, body, closing) plus signature.
+- Mention one measurable achievement or impact idea inspired by the job description.
+- Keep the closing line forward-looking and express enthusiasm about contributing.
+- Sign off with "Sincerely, Parmeet Singh" and explicitly include contact info as "Email: parmeet.singh@parmeetsingh.com" and "Phone: +91 74200 04161".
+- Skip any bracketed placeholders such as "[Company Address]" or "[City, State, Zip]"—address real companies and locations when possible.
+""".strip()
+
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": SYSTEM_COVER_PROMPT},
+            {"role": "user", "content": USER_COVER_PROMPT},
+        ],
+        temperature=0.4,
+    )
+    cover_letter = response.choices[0].message.content.strip()
+    if not cover_letter:
+        raise ValueError("Cover letter generation returned empty text.")
+    lines = [
+        ln
+        for ln in cover_letter.splitlines()
+        if not re.search(r"\[(Company Address|City, State, Zip)\]", ln, re.IGNORECASE)
+    ]
+    cleaned = "\n".join(lines)
+    cleaned = cleaned.replace("[Your Email Address]", "Email: parmeet.singh@parmeetsingh.com")
+    cleaned = cleaned.replace("[Your Phone Number]", "Phone: +91 74200 04161")
+    return cleaned
 
 
 def enforce_projects_block(text):
@@ -1128,7 +1196,7 @@ def insert_projects_section(text: str, role_keyword: str) -> str:
 
 
 # --- Workflow Controls ---
-col_check, col_generate, col_reset = st.columns([3, 3, 1])
+col_check, col_generate = st.columns([3, 3])
 with col_check:
     if st.button("Check Job Details (Remote, Salary, Experience)"):
         if not job_desc.strip():
@@ -1240,11 +1308,13 @@ with col_generate:
                             "granthi.parmeet@gmail.com", PRIMARY_EMAIL
                         )
 
-                first_line = job_desc_for_generation.split("\n")[0].strip()
-                job_role = re.sub(r"[^A-Za-z0-9]+", "_", first_line) or "Role"
+                job_role = derive_file_role_label(job_desc_for_generation)
 
                 pdf_file = generate_pdf(
-                    updated_resume, job_role, st.session_state.get("selected_format")
+                    updated_resume,
+                    job_role,
+                    st.session_state.get("selected_format"),
+                    doc_label="resume",
                 )
                 with open(pdf_file, "rb") as pdf_handle:
                     pdf_bytes = pdf_handle.read()
@@ -1255,9 +1325,34 @@ with col_generate:
                 st.session_state["resume_generated"] = True
                 st.success("Resume generated successfully!")
 
-with col_reset:
-    if st.button("Start New Resume"):
-        reset_workflow()
+cover_col, _ = st.columns([3, 3])
+with cover_col:
+    if st.button("Generate Cover Letter", key="generate_cover_letter"):
+        clean_jd = job_desc.strip()
+        if not clean_jd:
+            st.error("Job description cannot be empty.")
+        else:
+            with st.spinner("Generating cover letter…"):
+                try:
+                    cover_letter = generate_cover_letter_text(clean_jd)
+                    job_role_label = derive_file_role_label(clean_jd)
+                    cover_pdf_file = generate_pdf(
+                        cover_letter,
+                        job_role_label,
+                        st.session_state.get("selected_format"),
+                        doc_label="cover_letter",
+                        fit_page=False,
+                    )
+                    with open(cover_pdf_file, "rb") as pdf_handle:
+                        cover_pdf_bytes = pdf_handle.read()
+                except Exception as exc:  # pylint: disable=broad-except
+                    st.error(f"Cover letter generation failed: {exc}")
+                else:
+                    st.session_state["cover_letter"] = cover_letter
+                    st.session_state["cover_letter_generated"] = True
+                    st.session_state["cover_letter_pdf_filename"] = cover_pdf_file
+                    st.session_state["cover_letter_pdf_bytes"] = cover_pdf_bytes
+                    st.success("Cover letter generated.")
 
 
 # --- Display Analysis & Decision ---
@@ -1295,15 +1390,10 @@ if analysis:
         )
         st.session_state["resume_consent"] = False
     else:
-        yes_col, no_col = st.columns(2)
-        with yes_col:
-            if st.button("Yes, generate resume", key="confirm_yes"):
-                st.session_state["resume_consent"] = True
-                st.session_state["resume_generated"] = False
-                st.info("Great! Click 'Generate Tailored Resume' to continue.")
-        with no_col:
-            if st.button("No, start over", key="confirm_no"):
-                reset_workflow()
+        if st.button("Yes, generate resume", key="confirm_yes"):
+            st.session_state["resume_consent"] = True
+            st.session_state["resume_generated"] = False
+            st.info("Great! Click 'Generate Tailored Resume' to continue.")
 
 
 # --- Output Resume & Downloads ---
@@ -1320,3 +1410,21 @@ if st.session_state.get("resume_generated"):
         st.session_state.get("updated_resume", ""),
         height=400,
     )
+
+if st.session_state.get("cover_letter_generated") and st.session_state.get(
+    "cover_letter_pdf_bytes"
+):
+    st.download_button(
+        label="⬇️ Download Cover Letter (PDF)",
+        data=st.session_state.get("cover_letter_pdf_bytes"),
+        file_name=st.session_state.get("cover_letter_pdf_filename"),
+        mime="application/pdf",
+    )
+
+st.subheader("Generated Cover Letter (Text Format)")
+st.text_area(
+    "Cover Letter",
+    st.session_state.get("cover_letter", ""),
+    height=400,
+    help="Use the same job description input above to regenerate if the content isn't aligned.",
+)
