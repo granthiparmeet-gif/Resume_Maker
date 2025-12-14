@@ -29,6 +29,7 @@ PREFERRED_TEMPLATE_NAMES = [
     "parmeet_singh_resume.pdf",
 ]
 PRIMARY_EMAIL = "parmeet.singh@parmeetsingh.com"
+STANDARD_FONT_SIZE = 12
 TEMPLATE_PATH = next(
     (path for path in PREFERRED_TEMPLATE_NAMES if os.path.exists(path)),
     PREFERRED_TEMPLATE_NAMES[0],
@@ -201,7 +202,6 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
     available_height = pdf.h - top_margin - bottom_margin
     usable_width = pdf.w - left_margin - right_margin
 
-    base_font_size = 11
     def normalize_line(text_line: str) -> str:
         # Normalize dashes and bullets so they survive Latin-1 encoding.
         cleaned = text_line.replace("–", "-").replace("—", "-").replace("‑", "-").replace("•", "-")
@@ -231,9 +231,8 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         limit_line_width(normalize_project_heading_line(ln)) for ln in safe_lines
     ]
 
-    # Determine body font size to fit longest line within width, but keep standard size
-    # for the Experience-Focused layout so the text never shrinks.
-    font_size = base_font_size
+    # Use the standard font size for every resume layout.
+    font_size = STANDARD_FONT_SIZE
     pdf.set_font("Arial", size=font_size)
 
     # Line height scaled to fill the page without overflow.
