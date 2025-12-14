@@ -797,12 +797,6 @@ else:
     st.session_state.setdefault("resume_comment", "")
 
 
-def reset_workflow():
-    for key, value in SESSION_DEFAULTS.items():
-        st.session_state[key] = value
-    st.rerun()
-
-
 def analyze_job_description(description):
     """Use OpenAI to extract remote status, salary, and experience with citations."""
     SYSTEM_ANALYSIS_PROMPT = """
@@ -1128,7 +1122,7 @@ def insert_projects_section(text: str, role_keyword: str) -> str:
 
 
 # --- Workflow Controls ---
-col_check, col_generate, col_reset = st.columns([3, 3, 1])
+col_check, col_generate = st.columns([3, 3])
 with col_check:
     if st.button("Check Job Details (Remote, Salary, Experience)"):
         if not job_desc.strip():
@@ -1255,11 +1249,6 @@ with col_generate:
                 st.session_state["resume_generated"] = True
                 st.success("Resume generated successfully!")
 
-with col_reset:
-    if st.button("Start New Resume"):
-        reset_workflow()
-
-
 # --- Display Analysis & Decision ---
 analysis = st.session_state.get("job_analysis")
 if analysis:
@@ -1295,17 +1284,12 @@ if analysis:
         )
         st.session_state["resume_consent"] = False
     else:
-        yes_col, no_col = st.columns(2)
+        yes_col, _ = st.columns(2)
         with yes_col:
             if st.button("Yes, generate resume", key="confirm_yes"):
                 st.session_state["resume_consent"] = True
                 st.session_state["resume_generated"] = False
                 st.info("Great! Click 'Generate Tailored Resume' to continue.")
-        with no_col:
-            if st.button("No, start over", key="confirm_no"):
-                reset_workflow()
-
-
 # --- Output Resume & Downloads ---
 if st.session_state.get("resume_generated"):
     st.download_button(
