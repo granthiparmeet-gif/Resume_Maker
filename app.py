@@ -1048,7 +1048,7 @@ Return only the updated resume with EXACTLY the same number of lines as the temp
     return response.choices[0].message.content
 
 
-def generate_cover_letter_text(description: str) -> str:
+def generate_cover_letter_text(description: str, resume_story: str = "") -> str:
     """Create a cover letter referencing the job description in a standard format."""
     if not description:
         raise ValueError("Job description is required to build a cover letter.")
@@ -1064,18 +1064,27 @@ name is discoverable from the description, reference it in the greeting or openi
 respectful, and aligned with the target job, avoiding robotic phrasing. Return only the cover letter text without explanations.
 """.strip()
 
+    resume_block = f"\n[RESUME]\n{resume_story}\n" if resume_story else ""
+    resume_alignment = (
+        "\n- Align the letter’s narrative with the resume above, reusing its achievements and metrics exactly."
+        if resume_story
+        else ""
+    )
+
     USER_COVER_PROMPT = f"""
 Date: {today_str}
 
 [JOB DESCRIPTION]
 {description}
 
+{resume_block}
 [INSTRUCTIONS]
 - Stay within one-page letter convention and write 3 paragraphs (intro, body, closing) plus signature.
 - Mention one measurable achievement or impact idea inspired by the job description.
 - Keep the closing line forward-looking and express enthusiasm about contributing.
 - Sign off with "Sincerely, Parmeet Singh" and explicitly include contact info as "Email: parmeet.singh@parmeetsingh.com" and "Phone: +91 74200 04161".
 - Skip any bracketed placeholders such as "[Company Address]" or "[City, State, Zip]"—address real companies and locations when possible.
+{resume_alignment}
 """.strip()
 
     response = openai.chat.completions.create(
@@ -1399,6 +1408,7 @@ with col_generate:
                 st.session_state["pdf_filename"] = pdf_file
                 st.session_state["pdf_bytes"] = pdf_bytes
                 st.session_state["resume_generated"] = True
+                st.session_state["last_generated_resume"] = updated_resume
                 st.success("Resume generated successfully!")
 
 cover_col, _ = st.columns([3, 3])
@@ -1410,7 +1420,9 @@ with cover_col:
         else:
             with st.spinner("Generating cover letter…"):
                 try:
-                    cover_letter = generate_cover_letter_text(clean_jd)
+                    cover_letter = generate_cover_letter_text(
+                        clean_jd, st.session_state.get("last_generated_resume", "")
+                    )
                     job_role_label = derive_file_role_label(clean_jd)
                     cover_pdf_file = generate_pdf(
                         cover_letter,
