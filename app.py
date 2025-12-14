@@ -228,8 +228,17 @@ def generate_cover_letter_pdf(text: str, job_role: str) -> str:
     story: list = []
     for idx, paragraph in enumerate(paragraphs):
         story.append(Paragraph(escape(paragraph), style))
-        if idx < len(paragraphs) - 1:
-            story.append(Spacer(1, cover_paragraph_spacing))
+        story.append(Spacer(1, cover_paragraph_spacing))
+
+    story.append(Spacer(1, cover_paragraph_spacing * 1.2))
+    closing_lines = [
+        "Sincerely,",
+        "Parmeet Singh",
+        "Email: parmeet.singh@parmeetsingh.com",
+        "Phone: +91 74200 04161",
+    ]
+    for line in closing_lines:
+        story.append(Paragraph(escape(line), style))
     doc.build(story)
     return filename
 
@@ -304,7 +313,7 @@ def generate_pdf(
 
     # Line height scaled to fill the page without overflow.
     line_height = available_height / total_lines
-    min_line_height = font_size * 1.15
+    min_line_height = font_size
     max_line_height = font_size * 1.5 if not fit_page else float("inf")
     line_height = min(line_height, max_line_height)
     if line_height < min_line_height:
@@ -1088,6 +1097,9 @@ Date: {today_str}
     cleaned = "\n".join(lines)
     cleaned = cleaned.replace("[Your Email Address]", "Email: parmeet.singh@parmeetsingh.com")
     cleaned = cleaned.replace("[Your Phone Number]", "Phone: +91 74200 04161")
+    closing_idx = re.search(r"\bSincerely\b", cleaned, re.IGNORECASE)
+    if closing_idx:
+        cleaned = cleaned[: closing_idx.start()].rstrip()
     return cleaned
 
 
