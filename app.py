@@ -242,6 +242,10 @@ def generate_pdf(text, job_role, selected_format="LinkedIn + Projects"):
         line_height = min_line_height
     if line_height * total_lines > available_height:
         line_height = available_height / total_lines
+    if selected_format == "Experience-Focused (No LinkedIn/Projects)":
+        target_line_height = min(line_height * 1.5, available_height / total_lines)
+        if target_line_height > line_height:
+            line_height = target_line_height
 
     BULLET_MARGIN_RATIO = 0.15
     bullet_width_limit = usable_width * (1 - BULLET_MARGIN_RATIO)
