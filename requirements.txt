@@ -4,3 +4,4 @@ python-dotenv
 fpdf
 PyPDF2
 pdfplumber
+reportlab

@@ -9,6 +9,12 @@ import openai
 import streamlit as st
 from dotenv import load_dotenv
 from fpdf import FPDF
+from reportlab.lib.enums import TA_JUSTIFY
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from xml.sax.saxutils import escape
 
 load_dotenv(dotenv_path=".env")
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -177,6 +183,67 @@ def extract_kiran_role_from_description(description: str) -> str | None:
     return infer_job_role_from_description(description)
 
 
+def generate_cover_letter_pdf(text: str, job_role: str) -> str:
+    """Render the cover letter text using ReportLab rather than FPDF."""
+    tokens = [t for t in re.split(r"[_\s]+", job_role) if t]
+    short_role = "_".join(tokens[:4]) if tokens else "Role"
+    if len(short_role) > 40:
+        short_role = short_role[:40].rstrip("_")
+    filename = f"Parmeet_Singh_{short_role}_cover_letter.pdf"
+    left_margin = 7 * mm
+    right_margin = 7 * mm
+    top_margin = 15 * mm
+    bottom_margin = 7 * mm
+    font_size = STANDARD_FONT_SIZE
+    cover_line_height = font_size * 1.08
+    cover_paragraph_spacing = font_size * 0.75
+
+    raw_paragraphs = re.split(r"\n\s*\n+", text.strip())
+    paragraphs: list[str] = []
+    for para in raw_paragraphs:
+        if not para.strip():
+            continue
+        single_line = " ".join(para.splitlines())
+        normalized = normalize_line(re.sub(r"\s+", " ", single_line).strip())
+        if normalized:
+            paragraphs.append(normalized)
+    if not paragraphs:
+        paragraphs.append("")
+
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=A4,
+        leftMargin=left_margin,
+        rightMargin=right_margin,
+        topMargin=top_margin,
+        bottomMargin=bottom_margin,
+    )
+    style = ParagraphStyle(
+        "cover_letter",
+        fontName="Helvetica",
+        fontSize=font_size,
+        leading=cover_line_height,
+        alignment=TA_JUSTIFY,
+    )
+    story: list = []
+    for idx, paragraph in enumerate(paragraphs):
+        story.append(Paragraph(escape(paragraph), style))
+        if idx < len(paragraphs) - 1:
+            story.append(Spacer(1, cover_paragraph_spacing))
+    doc.build(story)
+    return filename
+
+
+def normalize_line(text_line: str) -> str:
+    """Normalize dashes and punctuation so Latin-1 encoding survives."""
+    cleaned = text_line.replace("–", "-").replace("—", "-").replace("‑", "-").replace("•", "-")
+    cleaned = re.sub(r"\s\?\s", " - ", cleaned)
+    cleaned = re.sub(r"\s\?(\W|$)", r" -\1", cleaned)
+    cleaned = re.sub(r"(\W|^)\?\s", r"\1- ", cleaned)
+    cleaned = cleaned.replace("?", "-")
+    return (cleaned.encode("latin-1", "replace").decode("latin-1")) or " "
+
+
 # -----------------------------
 # PDF Generator
 # -----------------------------
@@ -191,6 +258,8 @@ def generate_pdf(
     short_role = "_".join(tokens[:4]) if tokens else "Role"
     if len(short_role) > 40:
         short_role = short_role[:40].rstrip("_")
+    if doc_label == "cover_letter":
+        return generate_cover_letter_pdf(text, job_role)
     filename = f"Parmeet_Singh_{short_role}_{doc_label}.pdf"
     raw_lines = text.split("\n")
     lines = [ln for ln in raw_lines if ln is not None]
@@ -208,15 +277,6 @@ def generate_pdf(
 
     available_height = pdf.h - top_margin - bottom_margin
     usable_width = pdf.w - left_margin - right_margin
-
-    def normalize_line(text_line: str) -> str:
-        # Normalize dashes and bullets so they survive Latin-1 encoding.
-        cleaned = text_line.replace("–", "-").replace("—", "-").replace("‑", "-").replace("•", "-")
-        cleaned = re.sub(r"\s\?\s", " - ", cleaned)
-        cleaned = re.sub(r"\s\?(\W|$)", r" -\1", cleaned)
-        cleaned = re.sub(r"(\W|^)\?\s", r"\1- ", cleaned)
-        cleaned = cleaned.replace("?", "-")
-        return (cleaned.encode("latin-1", "replace").decode("latin-1")) or " "
 
     safe_lines = [normalize_line(line) for line in lines]
 
@@ -264,11 +324,6 @@ def generate_pdf(
         if selected_format == "Experience-Focused (No LinkedIn/Projects)"
         else line_height
     )
-    cover_line_height = font_size * 0.88
-    cover_paragraph_spacing = font_size * 0.45
-
-
-
     name_size = max(font_size + 6, 16)
     heading_size = max(font_size + 2, font_size * 1.2)
     project_heading_size = max(font_size, heading_size * 0.75)
@@ -342,27 +397,6 @@ def generate_pdf(
                 current_line = word
         lines.append(current_line)
         return lines
-
-    if doc_label == "cover_letter":
-        pdf.set_xy(left_margin, top_margin)
-        pdf.set_font("Arial", "", font_size)
-        raw_paragraphs = re.split(r"\n\s*\n+", text.strip())
-        paragraphs = []
-        for para in raw_paragraphs:
-            if not para.strip():
-                continue
-            single_line = " ".join(para.splitlines())
-            single_line = normalize_line(re.sub(r"\s+", " ", single_line).strip())
-            if single_line:
-                paragraphs.append(single_line)
-        if not paragraphs:
-            paragraphs.append("")
-        for idx, paragraph in enumerate(paragraphs):
-            pdf.multi_cell(usable_width, cover_line_height, paragraph, align="J")
-            if idx < len(paragraphs) - 1:
-                pdf.ln(cover_paragraph_spacing)
-        pdf.output(filename)
-        return filename
 
     def wrap_bullet_line(text_line: str) -> list[str]:
         stripped = text_line.lstrip()
