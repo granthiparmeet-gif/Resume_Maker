@@ -252,7 +252,7 @@ def generate_pdf(
     if line_height * total_lines > available_height:
         line_height = available_height / total_lines
     if selected_format == "Experience-Focused (No LinkedIn/Projects)":
-        experience_line_height = min(line_height * 2, available_height / total_lines)
+        experience_line_height = min(line_height * 1.8, available_height / total_lines)
         if experience_line_height > line_height:
             line_height = experience_line_height
 
@@ -264,6 +264,10 @@ def generate_pdf(
         if selected_format == "Experience-Focused (No LinkedIn/Projects)"
         else line_height
     )
+    cover_line_height = font_size * 0.88
+    cover_paragraph_spacing = font_size * 0.45
+
+
 
     name_size = max(font_size + 6, 16)
     heading_size = max(font_size + 2, font_size * 1.2)
@@ -338,6 +342,27 @@ def generate_pdf(
                 current_line = word
         lines.append(current_line)
         return lines
+
+    if doc_label == "cover_letter":
+        pdf.set_xy(left_margin, top_margin)
+        pdf.set_font("Arial", "", font_size)
+        raw_paragraphs = re.split(r"\n\s*\n+", text.strip())
+        paragraphs = []
+        for para in raw_paragraphs:
+            if not para.strip():
+                continue
+            single_line = " ".join(para.splitlines())
+            single_line = normalize_line(re.sub(r"\s+", " ", single_line).strip())
+            if single_line:
+                paragraphs.append(single_line)
+        if not paragraphs:
+            paragraphs.append("")
+        for idx, paragraph in enumerate(paragraphs):
+            pdf.multi_cell(usable_width, cover_line_height, paragraph, align="J")
+            if idx < len(paragraphs) - 1:
+                pdf.ln(cover_paragraph_spacing)
+        pdf.output(filename)
+        return filename
 
     def wrap_bullet_line(text_line: str) -> list[str]:
         stripped = text_line.lstrip()
