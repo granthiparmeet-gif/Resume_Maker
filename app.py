@@ -23,9 +23,47 @@ if not openai.api_key:
         "OPENAI_API_KEY is not set. Add it to your environment or the .env file before proceeding."
     )
 
-PROJECT_TITLE_PREFIX = "PROJECT_TITLE::"
 BOLD_DETECTION_PATTERN = re.compile(r"\*\*\s*(.+?)\s*\*\*")
+PROJECT_TITLE_PREFIX = "PROJECT_TITLE::"
 PROJECT_TITLE_BOLD_PATTERN = re.compile(r"^\*\s*\*\s*(.+?)\s*\*\*\s*$")
+
+STANDARD_FONT_SIZE = 12
+STOPWORDS = {
+    "and",
+    "the",
+    "with",
+    "from",
+    "for",
+    "to",
+    "of",
+    "in",
+    "a",
+    "an",
+    "on",
+    "by",
+    "at",
+}
+
+
+def get_short_role_label(job_role: str) -> str:
+    if not job_role:
+        return "role"
+    tokens = [
+        re.sub(r"[^A-Za-z0-9]+", "", token).lower()
+        for token in re.split(r"[_\s]+", job_role)
+        if token
+    ]
+    filtered = [token for token in tokens if token and token not in STOPWORDS]
+    chosen = filtered or tokens
+    short_tokens = chosen[:3]
+    short_role = "_".join(short_tokens) if short_tokens else "role"
+    short_role = short_role.strip("_")
+    return short_role[:40] if short_role else "role"
+
+
+def build_filename(prefix: str, job_role: str) -> str:
+    short_role = get_short_role_label(job_role)
+    return f"parmeet_singh_{prefix}_{short_role}.pdf"
 
 # -----------------------------
 # Load Resume Template From File
@@ -36,7 +74,6 @@ PREFERRED_TEMPLATE_NAMES = [
     "parmeet_singh_resume.pdf",
 ]
 PRIMARY_EMAIL = "parmeet.singh@parmeetsingh.com"
-STANDARD_FONT_SIZE = 12
 TEMPLATE_PATH = next(
     (path for path in PREFERRED_TEMPLATE_NAMES if os.path.exists(path)),
     PREFERRED_TEMPLATE_NAMES[0],
@@ -185,11 +222,7 @@ def extract_kiran_role_from_description(description: str) -> str | None:
 
 def generate_cover_letter_pdf(text: str, job_role: str) -> str:
     """Render the cover letter text using ReportLab rather than FPDF."""
-    tokens = [t for t in re.split(r"[_\s]+", job_role) if t]
-    short_role = "_".join(tokens[:4]) if tokens else "Role"
-    if len(short_role) > 40:
-        short_role = short_role[:40].rstrip("_")
-    filename = f"Parmeet_Singh_{short_role}_cover_letter.pdf"
+    filename = build_filename("coverletter", job_role)
     left_margin = 7 * mm
     right_margin = 7 * mm
     top_margin = 15 * mm
@@ -263,13 +296,9 @@ def generate_pdf(
     doc_label="resume",
     fit_page=True,
 ):
-    tokens = [t for t in re.split(r"[_\s]+", job_role) if t]
-    short_role = "_".join(tokens[:4]) if tokens else "Role"
-    if len(short_role) > 40:
-        short_role = short_role[:40].rstrip("_")
     if doc_label == "cover_letter":
         return generate_cover_letter_pdf(text, job_role)
-    filename = f"Parmeet_Singh_{short_role}_{doc_label}.pdf"
+    filename = build_filename("resume", job_role)
     raw_lines = text.split("\n")
     lines = [ln for ln in raw_lines if ln is not None]
     total_lines = max(len(lines), 1)
@@ -336,6 +365,10 @@ def generate_pdf(
     name_size = max(font_size + 6, 16)
     heading_size = max(font_size + 2, font_size * 1.2)
     project_heading_size = max(font_size, heading_size * 0.75)
+
+    def normalize_inline_hyphen(text_line: str) -> str:
+        """Replace inline hyphens between words to keep narration human like."""
+        return re.sub(r"(?<=[A-Za-z0-9])-(?=[A-Za-z0-9])", " ", text_line)
 
     def is_heading(text_line: str) -> bool:
         stripped = text_line.strip()
@@ -625,6 +658,10 @@ def generate_pdf(
     while idx < len(safe_lines):
         line = safe_lines[idx]
         stripped = line.strip()
+        is_bullet = is_bullet_line(stripped)
+        if not is_bullet:
+            line = normalize_inline_hyphen(line)
+            stripped = line.strip()
 
         render_line, _, is_project_title = detect_bold_line(line)
         if is_project_title and stripped:
@@ -853,6 +890,7 @@ SESSION_DEFAULTS = {
     "pdf_bytes": None,
     "selected_format": "Experience-Focused (No LinkedIn/Projects)",
     "resume_comment": "",
+    "last_generated_resume": "",
 }
 for key, value in SESSION_DEFAULTS.items():
     st.session_state.setdefault(key, value)
@@ -1175,6 +1213,7 @@ def clean_summary_labels(text: str) -> str:
         r"^\s*(?:description|summary|professional summary|overview|role|position|job title)\s*:\s*",
         re.IGNORECASE,
     )
+    value_pattern = re.compile(r"^\s*things we value\s*:\s*", re.IGNORECASE)
     lines = text.split("\n")
     summary_idx = next(
         (idx for idx, ln in enumerate(lines) if ln.strip().lower() == "professional summary"),
@@ -1192,6 +1231,7 @@ def clean_summary_labels(text: str) -> str:
             continue
         found_text = True
         cleaned = re.sub(pattern, "", stripped)
+        cleaned = value_pattern.sub("", cleaned)
         lines[idx] = cleaned
     return "\n".join(lines)
 
@@ -1200,9 +1240,10 @@ def rewrite_kiran_role_line(text: str, role_keyword: str) -> str:
     """Ensure the Kiran Engineering Works heading refers to the target job role only."""
     if not role_keyword:
         return text
+    cleaned_role = sanitize_job_role_candidate(role_keyword)
     pattern = re.compile(r"(Kiran Engineering Works\s*[–—-]\s*)(.+)", re.IGNORECASE)
     def repl(match):
-        return f"{match.group(1)}{role_keyword}"
+        return f"{match.group(1)}{cleaned_role}"
     return pattern.sub(repl, text, count=1)
 
 
