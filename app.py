@@ -891,6 +891,12 @@ SESSION_DEFAULTS = {
     "selected_format": "Experience-Focused (No LinkedIn/Projects)",
     "resume_comment": "",
     "last_generated_resume": "",
+    "planned_job_role": "",
+    "resume_text_area": "",
+    "resume_text_last_pdf": "",
+    "cover_letter_job_role": "",
+    "cover_letter_text_area": "",
+    "cover_letter_text_last_pdf": "",
 }
 for key, value in SESSION_DEFAULTS.items():
     st.session_state.setdefault(key, value)
@@ -1341,6 +1347,15 @@ with col_check:
                     st.session_state["updated_resume"] = ""
                     st.session_state["pdf_filename"] = ""
                     st.session_state["pdf_bytes"] = None
+                    st.session_state["planned_job_role"] = ""
+                    st.session_state["resume_text_area"] = ""
+                    st.session_state["resume_text_last_pdf"] = ""
+                    st.session_state["cover_letter_job_role"] = ""
+                    st.session_state["cover_letter_text_area"] = ""
+                    st.session_state["cover_letter_text_last_pdf"] = ""
+                    st.session_state["cover_letter_pdf_filename"] = ""
+                    st.session_state["cover_letter_pdf_bytes"] = None
+                    st.session_state["cover_letter_generated"] = False
                     st.success("Job analysis completed. Review the findings below.")
 
 with col_generate:
@@ -1378,8 +1393,6 @@ with col_generate:
                 )
 
                 updated_resume = None
-                pdf_file = ""
-                pdf_bytes = None
                 selected_format = st.session_state.get("selected_format")
                 style_instructions = FORMAT_STYLES[selected_format]["instructions"]
                 comment_value = st.session_state.get("resume_comment", "").strip()
@@ -1403,7 +1416,6 @@ with col_generate:
                         f"\"{comment_value}\""
                     )
                 style_instructions += role_instruction
-
                 with st.spinner("Generating resume…"):
                     updated_resume = generate_resume_text(
                         job_desc_for_generation,
@@ -1434,23 +1446,22 @@ with col_generate:
                             "granthi.parmeet@gmail.com", PRIMARY_EMAIL
                         )
 
-                job_role = derive_file_role_label(job_desc_for_generation)
-
-                pdf_file = generate_pdf(
-                    updated_resume,
-                    job_role,
-                    st.session_state.get("selected_format"),
-                    doc_label="resume",
-                )
-                with open(pdf_file, "rb") as pdf_handle:
-                    pdf_bytes = pdf_handle.read()
+                planned_job_role = derive_file_role_label(job_desc_for_generation)
 
                 st.session_state["updated_resume"] = updated_resume
-                st.session_state["pdf_filename"] = pdf_file
-                st.session_state["pdf_bytes"] = pdf_bytes
                 st.session_state["resume_generated"] = True
                 st.session_state["last_generated_resume"] = updated_resume
-                st.success("Resume generated successfully!")
+                st.session_state["pdf_filename"] = ""
+                st.session_state["pdf_bytes"] = None
+                st.session_state["resume_text_last_pdf"] = ""
+                st.session_state["planned_job_role"] = planned_job_role
+                st.session_state["resume_text_area"] = updated_resume
+                st.session_state["cover_letter_pdf_filename"] = ""
+                st.session_state["cover_letter_pdf_bytes"] = None
+                st.session_state["cover_letter_text_last_pdf"] = ""
+                st.success(
+                    "Resume draft ready. Review or tweak the text below and generate the PDF when satisfied."
+                )
 
 cover_col, _ = st.columns([3, 3])
 with cover_col:
@@ -1465,23 +1476,19 @@ with cover_col:
                         clean_jd, st.session_state.get("last_generated_resume", "")
                     )
                     job_role_label = derive_file_role_label(clean_jd)
-                    cover_pdf_file = generate_pdf(
-                        cover_letter,
-                        job_role_label,
-                        st.session_state.get("selected_format"),
-                        doc_label="cover_letter",
-                        fit_page=False,
-                    )
-                    with open(cover_pdf_file, "rb") as pdf_handle:
-                        cover_pdf_bytes = pdf_handle.read()
                 except Exception as exc:  # pylint: disable=broad-except
                     st.error(f"Cover letter generation failed: {exc}")
                 else:
                     st.session_state["cover_letter"] = cover_letter
                     st.session_state["cover_letter_generated"] = True
-                    st.session_state["cover_letter_pdf_filename"] = cover_pdf_file
-                    st.session_state["cover_letter_pdf_bytes"] = cover_pdf_bytes
-                    st.success("Cover letter generated.")
+                    st.session_state["cover_letter_job_role"] = job_role_label
+                    st.session_state["cover_letter_pdf_filename"] = ""
+                    st.session_state["cover_letter_pdf_bytes"] = None
+                    st.session_state["cover_letter_text_area"] = cover_letter
+                    st.session_state["cover_letter_text_last_pdf"] = ""
+                    st.success(
+                        "Cover letter draft ready. Tweak the text below and generate the PDF when it looks good."
+                    )
 
 
 # --- Display Analysis & Decision ---
@@ -1527,33 +1534,104 @@ if analysis:
 
 # --- Output Resume & Downloads ---
 if st.session_state.get("resume_generated"):
-    st.download_button(
-        label="⬇️ Download Tailored Resume (PDF)",
-        data=st.session_state.get("pdf_bytes"),
-        file_name=st.session_state.get("pdf_filename"),
-        mime="application/pdf",
-    )
-
-    st.text_area(
-        "Generated Resume (Text Format)",
-        st.session_state.get("updated_resume", ""),
+    st.subheader("Generated Resume (Text Format)")
+    resume_key = "resume_text_area"
+    if resume_key not in st.session_state:
+        st.session_state[resume_key] = st.session_state.get("updated_resume", "")
+    edited_resume = st.text_area(
+        "Edit the resume text before creating the PDF",
+        key=resume_key,
         height=400,
     )
+    st.session_state["updated_resume"] = edited_resume
+    st.session_state["last_generated_resume"] = edited_resume
 
-if st.session_state.get("cover_letter_generated") and st.session_state.get(
-    "cover_letter_pdf_bytes"
-):
-    st.download_button(
-        label="⬇️ Download Cover Letter (PDF)",
-        data=st.session_state.get("cover_letter_pdf_bytes"),
-        file_name=st.session_state.get("cover_letter_pdf_filename"),
-        mime="application/pdf",
+    resume_pdf_ready = (
+        st.session_state.get("pdf_bytes")
+        and st.session_state.get("resume_text_last_pdf") == edited_resume
     )
+    if resume_pdf_ready:
+        st.download_button(
+            label="⬇️ Download Tailored Resume (PDF)",
+            data=st.session_state.get("pdf_bytes"),
+            file_name=st.session_state.get("pdf_filename"),
+            mime="application/pdf",
+        )
+    elif st.session_state.get("pdf_bytes"):
+        st.warning("Resume text has changed since the last PDF; regenerate to download an updated copy.")
 
-st.subheader("Generated Cover Letter (Text Format)")
-st.text_area(
-    "Cover Letter",
-    st.session_state.get("cover_letter", ""),
-    height=400,
-    help="Use the same job description input above to regenerate if the content isn't aligned.",
-)
+    if st.button("Generate Resume PDF from draft", key="generate_resume_pdf"):
+        resume_text_for_pdf = st.session_state.get("updated_resume", "")
+        if not resume_text_for_pdf.strip():
+            st.warning("Resume text is empty—generate the resume again before creating a PDF.")
+        else:
+            with st.spinner("Rendering resume PDF…"):
+                job_role_label = (
+                    st.session_state.get("planned_job_role")
+                    or derive_file_role_label(job_desc.strip())
+                )
+                pdf_file = generate_pdf(
+                    resume_text_for_pdf,
+                    job_role_label,
+                    st.session_state.get("selected_format"),
+                    doc_label="resume",
+                )
+                with open(pdf_file, "rb") as pdf_handle:
+                    pdf_bytes = pdf_handle.read()
+            st.session_state["pdf_filename"] = pdf_file
+            st.session_state["pdf_bytes"] = pdf_bytes
+            st.session_state["resume_text_last_pdf"] = resume_text_for_pdf
+            st.success("Resume PDF regenerated. Download the updated PDF above.")
+
+if st.session_state.get("cover_letter_generated"):
+    st.subheader("Generated Cover Letter (Text Format)")
+    cover_key = "cover_letter_text_area"
+    if cover_key not in st.session_state:
+        st.session_state[cover_key] = st.session_state.get("cover_letter", "")
+    edited_cover = st.text_area(
+        "Edit the cover letter text before creating the PDF",
+        key=cover_key,
+        height=400,
+        help="Use the content above as the latest draft and update as needed before downloading the PDF.",
+    )
+    st.session_state["cover_letter"] = edited_cover
+
+    cover_pdf_ready = (
+        st.session_state.get("cover_letter_pdf_bytes")
+        and st.session_state.get("cover_letter_text_last_pdf") == edited_cover
+    )
+    if cover_pdf_ready:
+        st.download_button(
+            label="⬇️ Download Cover Letter (PDF)",
+            data=st.session_state.get("cover_letter_pdf_bytes"),
+            file_name=st.session_state.get("cover_letter_pdf_filename"),
+            mime="application/pdf",
+        )
+    elif st.session_state.get("cover_letter_pdf_bytes"):
+        st.warning(
+            "Cover letter text has changed since the last PDF; regenerate to download an updated copy."
+        )
+
+    if st.button("Generate Cover Letter PDF from draft", key="generate_cover_letter_pdf"):
+        cover_text_for_pdf = st.session_state.get("cover_letter", "")
+        if not cover_text_for_pdf.strip():
+            st.warning("Cover letter text is empty—generate the cover letter before creating a PDF.")
+        else:
+            with st.spinner("Rendering cover letter PDF…"):
+                job_role_label = (
+                    st.session_state.get("cover_letter_job_role")
+                    or derive_file_role_label(job_desc.strip())
+                )
+                cover_pdf_file = generate_pdf(
+                    cover_text_for_pdf,
+                    job_role_label,
+                    st.session_state.get("selected_format"),
+                    doc_label="cover_letter",
+                    fit_page=False,
+                )
+                with open(cover_pdf_file, "rb") as pdf_handle:
+                    cover_pdf_bytes = pdf_handle.read()
+            st.session_state["cover_letter_pdf_filename"] = cover_pdf_file
+            st.session_state["cover_letter_pdf_bytes"] = cover_pdf_bytes
+            st.session_state["cover_letter_text_last_pdf"] = cover_text_for_pdf
+            st.success("Cover letter PDF regenerated. Download the updated PDF above.")
