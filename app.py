@@ -367,8 +367,8 @@ def generate_pdf(
     project_heading_size = max(font_size, heading_size * 0.75)
 
     def normalize_inline_hyphen(text_line: str) -> str:
-        """Replace inline hyphens between words to keep narration human like."""
-        return re.sub(r"(?<=[A-Za-z0-9])-(?=[A-Za-z0-9])", " ", text_line)
+        """Keep inline hyphenated words intact so we do not introduce spaced variants."""
+        return text_line
 
     def is_heading(text_line: str) -> bool:
         stripped = text_line.strip()
