@@ -224,7 +224,7 @@ def infer_job_role_from_description(description: str) -> str | None:
 
 
 def extract_kiran_role_from_description(description: str) -> str | None:
-    """Extract the role reference seeded near Kiran Engineering Works when possible."""
+    """Return the explicit role text located near Kiran Engineering Works in the description."""
     if not description:
         return None
     pattern = re.compile(r"Kiran Engineering Works\s*[–—-]\s*([^\n\r]+)", re.IGNORECASE)
@@ -242,7 +242,41 @@ def extract_kiran_role_from_description(description: str) -> str | None:
         words = role_text.split()
         if words:
             return " ".join(words[:5])
-    return infer_job_role_from_description(description)
+    return None
+
+
+def normalize_role_title(text: str) -> str:
+    """Normalize and trim role-like titles to the first four meaningful tokens."""
+    cleaned = re.sub(r"[^A-Za-z0-9&/ ]+", " ", text)
+    tokens = [tok.strip() for tok in cleaned.split() if tok.strip()]
+    if not tokens:
+        return ""
+    return " ".join(tokens[:4])
+
+
+def infer_primary_job_role(description: str) -> str | None:
+    """Infer the candidate's core job title from the description."""
+    if not description:
+        return None
+    candidates = []
+    explicit = extract_kiran_role_from_description(description)
+    if explicit:
+        candidates.append(explicit)
+    inferred = infer_job_role_from_description(description)
+    if inferred:
+        candidates.append(inferred)
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    for line in lines[:3]:
+        if (line.lower().split()[0] if line.split() else "").strip(":-–—").lower() in SUMMARY_NOISE_LABELS:
+            continue
+        if line.lower() in SECTION_HEADINGS:
+            continue
+        candidates.append(line)
+    for candidate in candidates:
+        normalized = normalize_role_title(candidate)
+        if normalized:
+            return normalized
+    return None
 
 
 def generate_cover_letter_pdf(text: str, job_role: str) -> str:
@@ -1289,14 +1323,16 @@ def remove_job_description_noise_from_summary(text: str) -> str:
     return "\n".join(cleaned)
 
 
-def rewrite_kiran_role_line(text: str, role_keyword: str) -> str:
-    """Ensure the Kiran Engineering Works heading refers to the target job role only."""
-    if not role_keyword:
+def rewrite_kiran_role_line(text: str, display_role: str) -> str:
+    """Ensure the Kiran Engineering Works heading names the intended job role."""
+    if not display_role:
         return text
-    cleaned_role = sanitize_job_role_candidate(role_keyword)
+    normalized_role = re.sub(r"\s{2,}", " ", display_role).strip(":-–— ")
+    if not normalized_role:
+        return text
     pattern = re.compile(r"(Kiran Engineering Works\s*[–—-]\s*)(.+)", re.IGNORECASE)
     def repl(match):
-        return f"{match.group(1)}{cleaned_role}"
+        return f"{match.group(1)}{normalized_role}"
     return pattern.sub(repl, text, count=1)
 
 
@@ -1444,18 +1480,26 @@ with col_generate:
                 style_instructions = FORMAT_STYLES[selected_format]["instructions"]
                 comment_value = st.session_state.get("resume_comment", "").strip()
                 role_keyword = "Software Engineer"
+                role_display = "Software Engineer"
                 role_instruction = ""
                 if selected_format == "Experience-Focused (No LinkedIn/Projects)":
-                    kiran_role = extract_kiran_role_from_description(job_desc_for_generation)
-                    if kiran_role:
-                        role_keyword = sanitize_job_role_candidate(kiran_role)
+                    inferred_role = infer_primary_job_role(job_desc_for_generation)
+                    if inferred_role:
+                        role_display = inferred_role
+                        role_keyword = sanitize_job_role_candidate(inferred_role)
                     else:
                         raw_role_line = job_desc_for_generation.split("\n")[0].strip()
-                        role_keyword = sanitize_job_role_candidate(raw_role_line)
+                        inferred_raw = normalize_role_title(raw_role_line)
+                        if inferred_raw:
+                            role_display = inferred_raw
+                            role_keyword = sanitize_job_role_candidate(inferred_raw)
+                        else:
+                            role_keyword = "Software Engineer"
+                            role_display = "Software Engineer"
                     role_instruction = (
                         "\nEnsure the Professional Summary begins with "
                         f"'{role_keyword}' and stays focused on that functional role without defaulting to AI/ML unless the job description explicitly calls for it."
-                        f" When referring to Kiran Engineering Works, label it as 'Kiran Engineering Works – {role_keyword}' and avoid any seniority prefixes."
+                        f" When referring to Kiran Engineering Works, label it as 'Kiran Engineering Works – {role_display}' and avoid any seniority prefixes."
                     )
                 if comment_value and selected_format == "Experience-Focused (No LinkedIn/Projects)":
                     style_instructions += (
@@ -1482,7 +1526,7 @@ with col_generate:
                             updated_resume
                         )
                         updated_resume = rewrite_kiran_role_line(
-                            updated_resume, role_keyword
+                            updated_resume, role_display
                         )
                         updated_resume = insert_projects_section(
                             updated_resume, role_keyword
