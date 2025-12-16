@@ -765,11 +765,7 @@ def generate_pdf(
     if contact_line:
         render_contact_line(contact_line)
         y = pdf.get_y() + (1.0 if no_line_after_contact else 1.5)
-        if not no_line_after_contact:
-            pdf.line(left_margin, y, pdf.w - right_margin, y)
-            pdf.set_y(y + 3)
-        else:
-            pdf.set_y(y + 1)
+        pdf.set_y(y + (1 if no_line_after_contact else 1.5))
 
     start_idx = 0
     # Skip consumed lines
@@ -808,15 +804,6 @@ def generate_pdf(
 
         if is_heading(stripped):
             y = pdf.get_y() + 1
-            is_kiran_heading = stripped.lower().startswith(
-                "kiran engineering works"
-            )
-            if (
-                heading_count > 0
-                and stripped.lower() != "projects"
-                and not is_kiran_heading
-            ):
-                pdf.line(left_margin, y, pdf.w - right_margin, y)
             pdf.set_y(y + (2 if heading_count > 0 else 1))
             pdf.set_font("Arial", "B", heading_size)
             pdf.cell(usable_width, line_height, stripped, ln=1, align="L")
