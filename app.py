@@ -70,6 +70,13 @@ SUMMARY_NOISE_LABELS = {
 }
 
 
+TARGET_COMPANY_PATTERNS = [
+    re.compile(r"^(?:Company|Employer|Organization|Hiring Company|Employer Name|Organization Name)\s*[:\-–—]\s*(.+)$", re.IGNORECASE),
+    re.compile(r"^(?:About|About Us|Who we are|About the company)\s*[:\-–—]?\s*(.+)$", re.IGNORECASE),
+    re.compile(r"^Join\s+(?:our\s+)?([A-Z][A-Za-z&\s]{1,40})", re.IGNORECASE),
+]
+
+
 def get_short_role_label(job_role: str) -> str:
     if not job_role:
         return "role"
@@ -311,6 +318,43 @@ def infer_primary_job_role(description: str) -> str | None:
         if canonical:
             return canonical
     return fallback
+
+
+def normalize_company_name(name: str) -> str:
+    cleaned = re.sub(r"[^\w& ]+", " ", name)
+    normalized = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return normalized
+
+
+def extract_target_company_name(description: str) -> str | None:
+    """Find the target employer name inside the job description for sanitization."""
+    if not description:
+        return None
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    for line in lines:
+        for pattern in TARGET_COMPANY_PATTERNS:
+            match = pattern.match(line)
+            if match:
+                candidate = normalize_company_name(match.group(1))
+                if candidate.lower() not in {"about", "company", "employer", "organization"}:
+                    return candidate
+    for line in lines:
+        match = re.search(r"([A-Z][A-Za-z&']+(?:\s+[A-Z][A-Za-z&']+){0,2})(?:\s+(?:is|are|seeks|seeking|looking|hiring|building|developing))", line)
+        if match:
+            return normalize_company_name(match.group(1))
+    return None
+
+
+def remove_target_company_references(text: str, company_name: str | None) -> str:
+    if not company_name:
+        return text
+    pattern = re.compile(
+        rf"\b{re.escape(company_name)}\b", re.IGNORECASE
+    )
+    cleaned = pattern.sub("", text)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    cleaned = re.sub(r" *\n *", "\n", cleaned)
+    return cleaned.strip()
 
 
 def generate_cover_letter_pdf(text: str, job_role: str) -> str:
@@ -980,6 +1024,7 @@ SESSION_DEFAULTS = {
     "cover_letter_job_role": "",
     "cover_letter_text_area": "",
     "cover_letter_text_last_pdf": "",
+    "target_company_name": "",
 }
 for key, value in SESSION_DEFAULTS.items():
     st.session_state.setdefault(key, value)
@@ -990,6 +1035,8 @@ job_desc = st.text_area(
     value=st.session_state.get("job_desc_input", ""),
 )
 st.session_state["job_desc_input"] = job_desc
+detected_company = extract_target_company_name(job_desc)
+st.session_state["target_company_name"] = detected_company or ""
 
 format_option = st.radio(
     "Choose Resume Formatting Style",
@@ -1573,6 +1620,10 @@ with col_generate:
                         updated_resume = updated_resume.replace(
                             "granthi.parmeet@gmail.com", PRIMARY_EMAIL
                         )
+                    company_name = st.session_state.get("target_company_name")
+                    updated_resume = remove_target_company_references(
+                        updated_resume, company_name
+                    )
 
                 planned_job_role = derive_file_role_label(job_desc_for_generation)
 
