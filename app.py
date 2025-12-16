@@ -808,7 +808,14 @@ def generate_pdf(
 
         if is_heading(stripped):
             y = pdf.get_y() + 1
-            if heading_count > 0 and stripped.lower() != "projects":
+            is_kiran_heading = stripped.lower().startswith(
+                "kiran engineering works"
+            )
+            if (
+                heading_count > 0
+                and stripped.lower() != "projects"
+                and not is_kiran_heading
+            ):
                 pdf.line(left_margin, y, pdf.w - right_margin, y)
             pdf.set_y(y + (2 if heading_count > 0 else 1))
             pdf.set_font("Arial", "B", heading_size)
@@ -1227,17 +1234,29 @@ Return only the updated resume with EXACTLY the same number of lines as the temp
     return response.choices[0].message.content
 
 
-def generate_cover_letter_text(description: str, resume_story: str = "") -> str:
+def build_cover_letter_header(company_name: str | None) -> str:
+    """Return the required date + employer header for cover letters."""
+    today_str = date.today().strftime("%B %d, %Y")
+    header_lines = [today_str, "", "Hiring Manager"]
+    final_company = company_name.strip() if company_name and company_name.strip() else "Company Name"
+    header_lines.append(final_company)
+    return "\n".join(header_lines)
+
+
+def generate_cover_letter_text(
+    description: str,
+    resume_story: str = "",
+    target_company: str | None = None,
+) -> str:
     """Create a cover letter referencing the job description in a standard format."""
     if not description:
         raise ValueError("Job description is required to build a cover letter.")
 
-    today_str = date.today().strftime("%B %d, %Y")
     SYSTEM_COVER_PROMPT = """
 You are a professional cover letter writer. Use the incoming job description to craft a thoughtful,
-human-toned cover letter with a standard business structure (date, salutation, intro, body, closing, signature).
+human-toned cover letter with a standard business structure (salutation, intro, body, closing, signature).
 Highlight the most relevant skills, responsibilities, and impact the candidate can bring to the role,
-and tie them back to the job description language. Include today's date at the top and sign the letter as
+and tie them back to the job description language. Sign the letter as
 Parmeet Singh. Avoid adding placeholder blocks like "[Company Address]" or "[Your Email Address]". If the company
 name is discoverable from the description, reference it in the greeting or opening sentence. Keep the tone confident,
 respectful, and aligned with the target job, avoiding robotic phrasing. Return only the cover letter text without explanations.
@@ -1251,13 +1270,11 @@ respectful, and aligned with the target job, avoiding robotic phrasing. Return o
     )
 
     USER_COVER_PROMPT = f"""
-Date: {today_str}
-
 [JOB DESCRIPTION]
 {description}
 
 {resume_block}
-[INSTRUCTIONS]
+- Do not write your own date/employer header; it will be added automatically before the letter body.
 - Stay within one-page letter convention and write 3 paragraphs (intro, body, closing) plus signature.
 - Mention one measurable achievement or impact idea inspired by the job description.
 - Keep the closing line forward-looking and express enthusiasm about contributing.
@@ -1288,7 +1305,19 @@ Date: {today_str}
     closing_idx = re.search(r"\bSincerely\b", cleaned, re.IGNORECASE)
     if closing_idx:
         cleaned = cleaned[: closing_idx.start()].rstrip()
-    return cleaned
+    body_lines = [ln for ln in cleaned.splitlines()]
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    if body_lines and body_lines[0].strip().lower().startswith("date"):
+        body_lines.pop(0)
+    date_pattern = re.compile(r"^[A-Za-z]+\s+\d{1,2},\s+\d{4}$")
+    if body_lines and date_pattern.match(body_lines[0].strip()):
+        body_lines.pop(0)
+    body_text = "\n".join(body_lines).strip()
+    header = build_cover_letter_header(target_company)
+    if body_text:
+        return f"{header}\n\n{body_text}"
+    return header
 
 
 def enforce_projects_block(text):
@@ -1416,9 +1445,9 @@ def rewrite_kiran_role_line(text: str, display_role: str) -> str:
     normalized_role = re.sub(r"\s{2,}", " ", display_role).strip(":-–— ")
     if not normalized_role:
         return text
-    pattern = re.compile(r"(Kiran Engineering Works\s*[–—-]\s*)(.+)", re.IGNORECASE)
+    pattern = re.compile(r"(Kiran Engineering Works)\s*[–—-]\s*(.+)", re.IGNORECASE)
     def repl(match):
-        return f"{match.group(1)}{normalized_role}"
+        return f"{match.group(1)} - {normalized_role}"
     return pattern.sub(repl, text, count=1)
 
 
@@ -1657,7 +1686,9 @@ with cover_col:
             with st.spinner("Generating cover letter…"):
                 try:
                     cover_letter = generate_cover_letter_text(
-                        clean_jd, st.session_state.get("last_generated_resume", "")
+                        clean_jd,
+                        st.session_state.get("last_generated_resume", ""),
+                        st.session_state.get("target_company_name"),
                     )
                     job_role_label = derive_file_role_label(clean_jd)
                 except Exception as exc:  # pylint: disable=broad-except
