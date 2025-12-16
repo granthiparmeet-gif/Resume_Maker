@@ -462,12 +462,17 @@ def generate_pdf(
             return f"{PROJECT_TITLE_PREFIX}{match.group(1).strip()}"
         return line
 
+    def fix_inline_hyphenation(text_line: str) -> str:
+        """Avoid spaces around inline hyphenated words while keeping bullet hyphen spacing."""
+        return re.sub(r"(?<=\w)\s*-\s*(?=\w)", "-", text_line)
+
     def limit_line_width(line: str) -> str:
         """Limit lines to ~75 characters using textwrap.fill while keeping a single line."""
         if not line.strip():
             return line
         wrapped = textwrap.fill(line, width=75, break_long_words=False)
-        return " ".join(wrapped.splitlines())
+        single_line = " ".join(wrapped.splitlines())
+        return fix_inline_hyphenation(single_line)
 
     safe_lines = [
         limit_line_width(normalize_project_heading_line(ln)) for ln in safe_lines
