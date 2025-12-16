@@ -544,6 +544,8 @@ def generate_pdf(
         # Heuristic: contains a dash or bullet separating company and role, but not a section heading.
         if " - " in stripped or " — " in stripped or " – " in stripped:
             return True
+        if stripped.lower().startswith("larsen & toubro infotech") and ":" in stripped:
+            return True
         return False
 
     def reflow_block(lines_block):
