@@ -20,7 +20,7 @@ load_dotenv(dotenv_path=".env")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     st.warning(
-        "OPENAI_API_KEY is not set. Add it to your environment or the .env file before proceeding."
+        "OPENAI_API_KEY is not set.There is a problem with API_KEY. Add it to your environment or the .env file before proceeding."
     )
 
 BOLD_DETECTION_PATTERN = re.compile(r"\*\*\s*(.+?)\s*\*\*")
