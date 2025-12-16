@@ -1446,7 +1446,7 @@ def rewrite_kiran_role_line(text: str, display_role: str) -> str:
         return text
     pattern = re.compile(r"(Kiran Engineering Works)\s*[–—-]\s*(.+)", re.IGNORECASE)
     def repl(match):
-        return f"{match.group(1)} - {normalized_role}"
+        return f"{match.group(1)}: {normalized_role}"
     return pattern.sub(repl, text, count=1)
 
 
