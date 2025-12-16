@@ -245,6 +245,19 @@ def extract_kiran_role_from_description(description: str) -> str | None:
     return None
 
 
+CANONICAL_JOB_TITLES = [
+    ("ML Engineer", ["ml engineer", "machine learning engineer", "machine learning"]),
+    ("AI Engineer", ["ai engineer", "artificial intelligence engineer", "ai software engineer", "ai ml engineer"]),
+    ("Data Scientist", ["data scientist", "analytics scientist"]),
+    ("Data Engineer", ["data engineer", "data platform engineer", "etl engineer"]),
+    ("Database Administrator", ["database administrator", "dba", "database admin"]),
+    ("Backend Engineer", ["backend engineer", "backend developer", "api engineer"]),
+    ("Support Engineer", ["support engineer", "support specialist", "support analyst"]),
+    ("DevOps Engineer", ["devops engineer", "platform engineer", "site reliability engineer"]),
+    ("Software Engineer", ["software engineer", "software developer", "application engineer", "full stack engineer", "full stack developer"]),
+]
+
+
 def normalize_role_title(text: str) -> str:
     """Normalize and trim role-like titles to the first four meaningful tokens."""
     cleaned = re.sub(r"[^A-Za-z0-9&/ ]+", " ", text)
@@ -252,6 +265,20 @@ def normalize_role_title(text: str) -> str:
     if not tokens:
         return ""
     return " ".join(tokens[:4])
+
+
+def select_canonical_job_title(candidate: str | None) -> str | None:
+    if not candidate:
+        return None
+    lowered = candidate.lower()
+    for title, keywords in CANONICAL_JOB_TITLES:
+        if any(keyword in lowered for keyword in keywords):
+            return title
+    if "engineer" in lowered:
+        return "Software Engineer"
+    if "specialist" in lowered or "analyst" in lowered:
+        return "Support Engineer"
+    return None
 
 
 def infer_primary_job_role(description: str) -> str | None:
@@ -267,16 +294,23 @@ def infer_primary_job_role(description: str) -> str | None:
         candidates.append(inferred)
     lines = [line.strip() for line in description.splitlines() if line.strip()]
     for line in lines[:3]:
-        if (line.lower().split()[0] if line.split() else "").strip(":-–—").lower() in SUMMARY_NOISE_LABELS:
+        head = (line.lower().split()[0] if line.split() else "").strip(":-–—")
+        if head.lower() in SUMMARY_NOISE_LABELS:
             continue
         if line.lower() in SECTION_HEADINGS:
             continue
         candidates.append(line)
+    fallback: str | None = None
     for candidate in candidates:
         normalized = normalize_role_title(candidate)
-        if normalized:
-            return normalized
-    return None
+        if not normalized:
+            continue
+        if fallback is None:
+            fallback = normalized
+        canonical = select_canonical_job_title(normalized)
+        if canonical:
+            return canonical
+    return fallback
 
 
 def generate_cover_letter_pdf(text: str, job_role: str) -> str:
