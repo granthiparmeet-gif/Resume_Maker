@@ -44,6 +44,31 @@ STOPWORDS = {
     "at",
 }
 
+SECTION_HEADINGS = {
+    "professional summary",
+    "experience",
+    "work experience",
+    "education",
+    "projects",
+    "skills",
+    "core skills",
+    "additional information",
+}
+
+SUMMARY_NOISE_LABELS = {
+    "about us",
+    "benefits",
+    "operating principles",
+    "values",
+    "eeo",
+    "equal employment opportunity",
+    "diversity",
+    "compensation",
+    "salary",
+    "our mission",
+    "perks",
+}
+
 
 def get_short_role_label(job_role: str) -> str:
     if not job_role:
@@ -374,17 +399,7 @@ def generate_pdf(
         stripped = text_line.strip()
         if not stripped:
             return False
-        known = {
-            "Professional Summary",
-            "Experience",
-            "Work Experience",
-            "Education",
-            "Projects",
-            "Skills",
-            "Core Skills",
-            "Additional Information",
-        }
-        if stripped in known:
+        if stripped.lower() in SECTION_HEADINGS:
             return True
         if stripped.isupper() and len(stripped) <= 40:
             return True
@@ -1242,6 +1257,38 @@ def clean_summary_labels(text: str) -> str:
     return "\n".join(lines)
 
 
+def remove_job_description_noise_from_summary(text: str) -> str:
+    """Drop employer-marketing sentences inside the Professional Summary block."""
+    lines = text.split("\n")
+    cleaned: list[str] = []
+    in_summary = False
+    skip_paragraph = False
+    for line in lines:
+        stripped = line.strip()
+        lower = stripped.lower()
+        if lower == "professional summary":
+            in_summary = True
+            skip_paragraph = False
+            cleaned.append(line)
+            continue
+        if in_summary:
+            if stripped and lower in SECTION_HEADINGS and lower != "professional summary":
+                in_summary = False
+                skip_paragraph = False
+                cleaned.append(line)
+                continue
+            if skip_paragraph:
+                if not stripped:
+                    skip_paragraph = False
+                continue
+            label_candidate = re.split(r"[:\-–—]", stripped, 1)[0].strip().lower()
+            if label_candidate in SUMMARY_NOISE_LABELS:
+                skip_paragraph = True
+                continue
+        cleaned.append(line)
+    return "\n".join(cleaned)
+
+
 def rewrite_kiran_role_line(text: str, role_keyword: str) -> str:
     """Ensure the Kiran Engineering Works heading refers to the target job role only."""
     if not role_keyword:
@@ -1431,6 +1478,9 @@ with col_generate:
                             updated_resume, comment_value, role_keyword
                         )
                         updated_resume = clean_summary_labels(updated_resume)
+                        updated_resume = remove_job_description_noise_from_summary(
+                            updated_resume
+                        )
                         updated_resume = rewrite_kiran_role_line(
                             updated_resume, role_keyword
                         )
