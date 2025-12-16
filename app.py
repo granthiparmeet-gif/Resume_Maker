@@ -474,8 +474,20 @@ def generate_pdf(
         single_line = " ".join(wrapped.splitlines())
         return fix_inline_hyphenation(single_line)
 
+    def rewrite_lti_heading_line(text_line: str) -> str:
+        """Use the preferred heading text when the template line matches the LTI entry."""
+        stripped = text_line.strip()
+        if re.match(
+            r"^(?:LTI\s*[-–—]\s*)?Larsen & Toubro Infotech(?: Ltd\.?)?\s*[-–—]\s*Software Engineer\s*$",
+            stripped,
+            re.IGNORECASE,
+        ):
+            return "Larsen & Toubro Infotech (L&T): Software Engineer"
+        return text_line
+
     safe_lines = [
-        limit_line_width(normalize_project_heading_line(ln)) for ln in safe_lines
+        rewrite_lti_heading_line(limit_line_width(normalize_project_heading_line(ln)))
+        for ln in safe_lines
     ]
 
     # Use the standard font size for every resume layout.
